@@ -1,5 +1,5 @@
 use gpui::prelude::*;
-use gpui::{div, px, rgb, SharedString};
+use gpui::{div, px, rgb, MouseButton, Point, Pixels, ScrollDelta, SharedString};
 use gpui_component::button::{Button, ButtonVariants as _};
 
 use crate::models::{Candle, CandleInterval};
@@ -15,6 +15,11 @@ pub struct CandleChart {
     pub show_bb: bool,
     pub show_macd: bool,
     pub show_rsi: bool,
+    // Interaction state
+    pub is_dragging: bool,
+    pub drag_start_x: f32,
+    pub drag_start_offset: usize,
+    pub hover_position: Option<Point<Pixels>>,
 }
 
 impl CandleChart {
@@ -30,7 +35,23 @@ impl CandleChart {
             show_bb: false,
             show_macd: false,
             show_rsi: false,
+            is_dragging: false,
+            drag_start_x: 0.0,
+            drag_start_offset: 0,
+            hover_position: None,
         }
+    }
+
+    /// Compute dynamic candle width based on visible_count.
+    /// When visible_count == 60 (default), width == 8.0.
+    fn candle_width(&self) -> f32 {
+        (8.0f32 * 60.0 / self.visible_count as f32).clamp(2.0, 20.0)
+    }
+
+    /// Clamp scroll_offset to valid range.
+    fn clamp_scroll_offset(&mut self) {
+        let max_offset = self.candles.len().saturating_sub(self.visible_count);
+        self.scroll_offset = self.scroll_offset.min(max_offset);
     }
 
     /// Returns the start..end index range into self.candles for visible candles.
@@ -371,10 +392,34 @@ impl Render for CandleChart {
         let vol_max = self.volume_max();
         let visible = self.visible_candles().to_vec();
         let (vis_start, vis_end) = self.visible_range();
-        let candle_width: f32 = 8.0;
+        let candle_width: f32 = self.candle_width();
         let candle_gap: f32 = 2.0;
         let chart_px_padding: f32 = 8.0;
         let dot_size: f32 = 3.0;
+
+        // Approximate chart area origin offset from window top-left
+        // toolbar ~32px + OHLCV bar ~24px = ~56px from top, 8px from left
+        let chart_area_top: f32 = 56.0;
+        let chart_area_left: f32 = chart_px_padding;
+
+        // Crosshair data: compute candle index and price from hover position
+        let hover_info = self.hover_position.map(|pos| {
+            let local_x = f32::from(pos.x) - chart_area_left;
+            let local_y = f32::from(pos.y) - chart_area_top;
+            let candle_step = candle_width + candle_gap;
+            let candle_idx = if candle_step > 0.0 {
+                (local_x / candle_step) as usize
+            } else {
+                0
+            };
+            let price_at_y = if local_y >= 0.0 && local_y <= chart_height {
+                let ratio = 1.0 - (local_y as f64 / chart_height as f64);
+                Some(price_min + ratio * price_range)
+            } else {
+                None
+            };
+            (pos, local_x, local_y, candle_idx, price_at_y)
+        });
 
         // Calculate MA values for the full candle array
         let ma_indicators = vec![
@@ -565,11 +610,71 @@ impl Render for CandleChart {
         };
 
         div()
+            .id("candle-chart-container")
             .w_full()
             .h_full()
             .flex()
             .flex_col()
             .bg(rgb(0x1a1a2e))
+            // Zoom: scroll wheel changes visible_count
+            .on_scroll_wheel(cx.listener(move |this, event: &gpui::ScrollWheelEvent, _window, _cx| {
+                let delta_y = match event.delta {
+                    ScrollDelta::Pixels(pt) => f32::from(pt.y),
+                    ScrollDelta::Lines(pt) => pt.y * 20.0,
+                };
+                // Scroll up (negative delta_y on most platforms) = zoom in = fewer candles
+                // Scroll down (positive delta_y) = zoom out = more candles
+                let old_count = this.visible_count;
+                let zoom_step = (old_count as f32 * 0.1).max(2.0) as i32;
+                let new_count = if delta_y > 0.0 {
+                    // zoom out
+                    (old_count as i32 + zoom_step).min(200) as usize
+                } else {
+                    // zoom in
+                    (old_count as i32 - zoom_step).max(20) as usize
+                };
+                // Adjust scroll_offset proportionally to keep center stable
+                if old_count > 0 && new_count != old_count {
+                    let center_ratio = this.scroll_offset as f64 / old_count as f64;
+                    this.scroll_offset = (center_ratio * new_count as f64).round() as usize;
+                }
+                this.visible_count = new_count;
+                this.clamp_scroll_offset();
+            }))
+            // Drag start
+            .on_mouse_down(MouseButton::Left, cx.listener(move |this, event: &gpui::MouseDownEvent, _window, _cx| {
+                this.is_dragging = true;
+                this.drag_start_x = f32::from(event.position.x);
+                this.drag_start_offset = this.scroll_offset;
+            }))
+            // Drag end
+            .on_mouse_up(MouseButton::Left, cx.listener(move |this, _event: &gpui::MouseUpEvent, _window, _cx| {
+                this.is_dragging = false;
+            }))
+            // Mouse move: drag pan + crosshair tracking
+            .on_mouse_move(cx.listener(move |this, event: &gpui::MouseMoveEvent, _window, _cx| {
+                // Update crosshair position
+                this.hover_position = Some(event.position);
+
+                // Handle drag panning
+                if this.is_dragging {
+                    let delta_x = f32::from(event.position.x) - this.drag_start_x;
+                    let cw = this.candle_width();
+                    let candle_step = cw + 2.0; // candle_gap = 2.0
+                    let candle_delta = (delta_x / candle_step) as isize;
+                    // Dragging right = going back in time = increase offset
+                    let new_offset = this.drag_start_offset as isize + candle_delta;
+                    this.scroll_offset = new_offset.max(0) as usize;
+                    this.clamp_scroll_offset();
+                }
+            }))
+            // Hover leave: clear crosshair
+            .on_hover(cx.listener(move |this, hovered: &bool, _window, _cx| {
+                if !hovered {
+                    this.hover_position = None;
+                    this.is_dragging = false;
+                }
+            }))
             // Toolbar: interval selector buttons + MA toggles + indicator toggles
             .child(
                 div()
@@ -691,12 +796,13 @@ impl Render for CandleChart {
             )
             // OHLCV info bar showing last candle data + MA values
             .child(self.render_ohlcv_bar(&visible, &ma_last_values))
-            // Main chart area: candlesticks + MA overlay + BB overlay
+            // Main chart area: candlesticks + MA overlay + BB overlay + crosshair
             .child(
                 div()
                     .h(px(chart_height))
                     .w_full()
                     .relative()
+                    .overflow_hidden()
                     .child(
                         div()
                             .h(px(chart_height))
@@ -719,7 +825,114 @@ impl Render for CandleChart {
                     // MA dots overlay
                     .child(ma_overlay)
                     // Bollinger Bands overlay
-                    .when(show_bb, |el| el.child(bb_overlay)),
+                    .when(show_bb, |el| el.child(bb_overlay))
+                    // Crosshair overlay
+                    .map(|el| {
+                        if let Some((_pos, local_x, local_y, candle_idx, price_at_y)) = hover_info {
+                            let total_chart_width = (visible.len() as f32) * (candle_width + candle_gap) + chart_px_padding * 2.0;
+
+                            // Crosshair container
+                            let mut crosshair = div()
+                                .absolute()
+                                .top_0()
+                                .left_0()
+                                .w_full()
+                                .h(px(chart_height));
+
+                            // Vertical line at mouse X
+                            if local_x >= 0.0 && local_x <= total_chart_width {
+                                crosshair = crosshair.child(
+                                    div()
+                                        .absolute()
+                                        .top_0()
+                                        .left(px(local_x))
+                                        .w(px(1.0))
+                                        .h(px(chart_height))
+                                        .bg(gpui::rgba(0xffffff44)),
+                                );
+                            }
+
+                            // Horizontal line at mouse Y
+                            if local_y >= 0.0 && local_y <= chart_height {
+                                crosshair = crosshair.child(
+                                    div()
+                                        .absolute()
+                                        .top(px(local_y))
+                                        .left_0()
+                                        .w_full()
+                                        .h(px(1.0))
+                                        .bg(gpui::rgba(0xffffff44)),
+                                );
+
+                                // Price label at right edge
+                                if let Some(price) = price_at_y {
+                                    let label_y = (local_y - 8.0).max(0.0);
+                                    crosshair = crosshair.child(
+                                        div()
+                                            .absolute()
+                                            .top(px(label_y))
+                                            .right(px(4.0))
+                                            .bg(rgb(0x333355))
+                                            .rounded(px(2.0))
+                                            .px(px(4.0))
+                                            .py(px(1.0))
+                                            .text_size(px(10.0))
+                                            .text_color(rgb(0xeeeeee))
+                                            .child(format!("{:.2}", price)),
+                                    );
+                                }
+                            }
+
+                            // Candle info tooltip
+                            if candle_idx < visible.len() {
+                                let c = &visible[candle_idx];
+                                let is_bullish = c.close >= c.open;
+                                let color = if is_bullish { 0x00ff88 } else { 0xff4444 };
+                                let tooltip_x = (local_x + 12.0).min(total_chart_width - 140.0).max(0.0);
+                                let tooltip_y = (local_y + 12.0).min(chart_height - 80.0).max(0.0);
+
+                                crosshair = crosshair.child(
+                                    div()
+                                        .absolute()
+                                        .top(px(tooltip_y))
+                                        .left(px(tooltip_x))
+                                        .bg(gpui::rgba(0x1a1a2eee))
+                                        .border_1()
+                                        .border_color(rgb(0x333355))
+                                        .rounded(px(4.0))
+                                        .px(px(6.0))
+                                        .py(px(4.0))
+                                        .flex()
+                                        .flex_col()
+                                        .gap(px(1.0))
+                                        .text_size(px(10.0))
+                                        .child(
+                                            div().flex().gap(px(4.0))
+                                                .child(div().text_color(rgb(0x888888)).child("O"))
+                                                .child(div().text_color(rgb(color)).child(format!("{:.2}", c.open)))
+                                                .child(div().text_color(rgb(0x888888)).child("H"))
+                                                .child(div().text_color(rgb(color)).child(format!("{:.2}", c.high)))
+                                        )
+                                        .child(
+                                            div().flex().gap(px(4.0))
+                                                .child(div().text_color(rgb(0x888888)).child("L"))
+                                                .child(div().text_color(rgb(color)).child(format!("{:.2}", c.low)))
+                                                .child(div().text_color(rgb(0x888888)).child("C"))
+                                                .child(div().text_color(rgb(color)).child(format!("{:.2}", c.close)))
+                                        )
+                                        .child(
+                                            div().flex().gap(px(4.0))
+                                                .child(div().text_color(rgb(0x888888)).child("Vol"))
+                                                .child(div().text_color(rgb(0xaaaaaa)).child(format!("{:.0}", c.volume)))
+                                        ),
+                                );
+                            }
+
+                            el.child(crosshair)
+                        } else {
+                            el
+                        }
+                    }),
             )
             // Price axis labels
             .child(self.render_price_axis(price_min, price_max))

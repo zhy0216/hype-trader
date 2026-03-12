@@ -208,7 +208,7 @@ impl Render for CandleChart {
         let ma_visible: Vec<(Vec<Option<f64>>, u32)> = ma_values
             .iter()
             .filter(|(_, _, show)| *show)
-            .map(|(vals, color, _)| (vals[vis_start..vis_end].to_vec(), *color))
+            .map(|(vals, color, _)| (vals.get(vis_start..vis_end).unwrap_or(&[]).to_vec(), *color))
             .collect();
 
         // Last visible MA values for OHLCV bar display

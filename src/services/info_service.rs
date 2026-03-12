@@ -1,75 +1,234 @@
 use anyhow::Result;
+use ethers::types::H160;
+use hyperliquid_rust_sdk::{BaseUrl, InfoClient};
 use crate::models::*;
 
 pub struct InfoService {
-    base_url: String,
+    client: InfoClient,
 }
 
 impl InfoService {
-    pub fn new(network: Network) -> Self {
+    pub async fn new(network: Network) -> Result<Self> {
         let base_url = match network {
-            Network::Mainnet => "https://api.hyperliquid.xyz".to_string(),
-            Network::Testnet => "https://api.hyperliquid-testnet.xyz".to_string(),
+            Network::Mainnet => BaseUrl::Mainnet,
+            Network::Testnet => BaseUrl::Testnet,
         };
-        Self { base_url }
+        let client = InfoClient::new(None, Some(base_url)).await?;
+        Ok(Self { client })
     }
 
-    /// Fetch all available trading symbols/assets metadata
+    /// Fetch all perpetual trading symbols with mid prices
     pub async fn fetch_symbols(&self) -> Result<Vec<Symbol>> {
-        // Use reqwest or hyperliquid_rust_sdk InfoClient to call /info endpoint
-        // For now, create a stub that returns mock data for compilation
-        // We'll wire up the real SDK calls later
-        Ok(vec![
-            Symbol { name: "ETH-USD".into(), base: "ETH".into(), quote: "USD".into(), last_price: 3500.0, change_24h: 2.5, volume_24h: 1_000_000.0 },
-            Symbol { name: "BTC-USD".into(), base: "BTC".into(), quote: "USD".into(), last_price: 65000.0, change_24h: -1.2, volume_24h: 5_000_000.0 },
-            Symbol { name: "SOL-USD".into(), base: "SOL".into(), quote: "USD".into(), last_price: 145.0, change_24h: 5.3, volume_24h: 800_000.0 },
-            Symbol { name: "ARB-USD".into(), base: "ARB".into(), quote: "USD".into(), last_price: 1.15, change_24h: -0.5, volume_24h: 200_000.0 },
-            Symbol { name: "DOGE-USD".into(), base: "DOGE".into(), quote: "USD".into(), last_price: 0.12, change_24h: 3.1, volume_24h: 400_000.0 },
-        ])
-    }
+        let meta = self.client.meta().await?;
+        let mids = self.client.all_mids().await?;
 
-    /// Fetch order book for a symbol
-    pub async fn fetch_orderbook(&self, _symbol: &str) -> Result<OrderBook> {
-        // Mock data for now
-        let asks: Vec<OrderBookLevel> = (0..20).map(|i| {
-            let price = 3500.0 + (i as f64) * 0.5;
-            let size = 10.0 - (i as f64) * 0.3;
-            OrderBookLevel { price, size: size.max(0.1), cumulative: 0.0 }
-        }).collect();
-        let bids: Vec<OrderBookLevel> = (0..20).map(|i| {
-            let price = 3499.5 - (i as f64) * 0.5;
-            let size = 8.0 - (i as f64) * 0.25;
-            OrderBookLevel { price, size: size.max(0.1), cumulative: 0.0 }
-        }).collect();
-        Ok(OrderBook { bids, asks, last_price: 3500.0 })
-    }
-
-    /// Fetch candle data
-    pub async fn fetch_candles(&self, _symbol: &str, _interval: CandleInterval, _limit: usize) -> Result<Vec<Candle>> {
-        // Mock candle data
-        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64;
-        let candles: Vec<Candle> = (0..100).rev().map(|i| {
-            let base = 3400.0 + (i as f64 * 1.5).sin() * 100.0;
-            Candle {
-                time: now - i * 3600_000,
-                open: base,
-                high: base + 20.0,
-                low: base - 15.0,
-                close: base + 5.0,
-                volume: 1000.0 + (i as f64) * 10.0,
+        let symbols = meta.universe.iter().map(|asset| {
+            let mid_price = mids.get(&asset.name)
+                .and_then(|s| s.parse::<f64>().ok())
+                .unwrap_or(0.0);
+            Symbol {
+                name: format!("{}-USD", asset.name),
+                base: asset.name.clone(),
+                quote: "USD".to_string(),
+                last_price: mid_price,
+                change_24h: 0.0,
+                volume_24h: 0.0,
             }
         }).collect();
+
+        Ok(symbols)
+    }
+
+    /// Fetch L2 order book snapshot for a coin (e.g. "ETH")
+    pub async fn fetch_orderbook(&self, coin: &str) -> Result<OrderBook> {
+        let snapshot = self.client.l2_snapshot(coin.to_string()).await?;
+
+        let mut bids = Vec::new();
+        let mut asks = Vec::new();
+
+        if let Some(bid_levels) = snapshot.levels.get(0) {
+            let mut cum = 0.0;
+            for level in bid_levels {
+                let price = level.px.parse::<f64>().unwrap_or(0.0);
+                let size = level.sz.parse::<f64>().unwrap_or(0.0);
+                cum += size;
+                bids.push(OrderBookLevel { price, size, cumulative: cum });
+            }
+        }
+        if let Some(ask_levels) = snapshot.levels.get(1) {
+            let mut cum = 0.0;
+            for level in ask_levels {
+                let price = level.px.parse::<f64>().unwrap_or(0.0);
+                let size = level.sz.parse::<f64>().unwrap_or(0.0);
+                cum += size;
+                asks.push(OrderBookLevel { price, size, cumulative: cum });
+            }
+        }
+
+        let last_price = bids.first().map(|b| b.price).unwrap_or(0.0);
+
+        Ok(OrderBook { bids, asks, last_price })
+    }
+
+    /// Fetch candle data for a coin
+    pub async fn fetch_candles(&self, coin: &str, interval: CandleInterval, limit: usize) -> Result<Vec<Candle>> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_millis() as u64;
+
+        let interval_ms: u64 = match interval {
+            CandleInterval::M1 => 60_000,
+            CandleInterval::M5 => 300_000,
+            CandleInterval::M15 => 900_000,
+            CandleInterval::H1 => 3_600_000,
+            CandleInterval::H4 => 14_400_000,
+            CandleInterval::D1 => 86_400_000,
+        };
+        let start_time = now - (limit as u64) * interval_ms;
+
+        let snapshot = self.client.candles_snapshot(
+            coin.to_string(),
+            interval.to_sdk_string().to_string(),
+            start_time,
+            now,
+        ).await?;
+
+        let candles = snapshot.iter().map(|c| {
+            Candle {
+                time: c.time_open,
+                open: c.open.parse::<f64>().unwrap_or(0.0),
+                high: c.high.parse::<f64>().unwrap_or(0.0),
+                low: c.low.parse::<f64>().unwrap_or(0.0),
+                close: c.close.parse::<f64>().unwrap_or(0.0),
+                volume: c.vlm.parse::<f64>().unwrap_or(0.0),
+            }
+        }).collect();
+
         Ok(candles)
     }
 
-    /// Fetch recent trades
-    pub async fn fetch_recent_trades(&self, _symbol: &str) -> Result<Vec<Trade>> {
-        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64;
-        Ok((0..50).map(|i| Trade {
-            time: now - i * 1000,
-            price: 3500.0 + (i as f64 * 0.7).sin() * 5.0,
-            size: 0.5 + (i as f64) * 0.1,
-            is_buy: i % 2 == 0,
-        }).collect())
+    /// Fetch recent trades for a coin
+    pub async fn fetch_recent_trades(&self, coin: &str) -> Result<Vec<Trade>> {
+        let trades = self.client.recent_trades(coin.to_string()).await?;
+
+        let result = trades.iter().map(|t| {
+            Trade {
+                time: t.time,
+                price: t.px.parse::<f64>().unwrap_or(0.0),
+                size: t.sz.parse::<f64>().unwrap_or(0.0),
+                is_buy: t.side == "B",
+            }
+        }).collect();
+
+        Ok(result)
+    }
+
+    /// Fetch user positions and margin summary
+    pub async fn fetch_user_state(&self, address: H160) -> Result<(Vec<Position>, PnlSummary)> {
+        let state = self.client.user_state(address).await?;
+
+        let positions: Vec<Position> = state.asset_positions.iter().filter_map(|ap| {
+            let d = &ap.position;
+            let szi: f64 = d.szi.parse().ok()?;
+            if szi.abs() < 1e-10 { return None; }
+
+            let side = if szi > 0.0 { OrderSide::Buy } else { OrderSide::Sell };
+            let entry_price = d.entry_px.as_ref()?.parse::<f64>().ok()?;
+            let unrealized_pnl = d.unrealized_pnl.parse::<f64>().unwrap_or(0.0);
+            let margin_used = d.margin_used.parse::<f64>().unwrap_or(0.0);
+            let leverage_val = if margin_used > 0.0 {
+                d.position_value.parse::<f64>().unwrap_or(0.0).abs() / margin_used
+            } else {
+                1.0
+            };
+
+            let mark_price = if szi.abs() > 1e-10 {
+                entry_price + unrealized_pnl / szi
+            } else {
+                entry_price
+            };
+
+            Some(Position {
+                symbol: format!("{}-USD", d.coin),
+                side,
+                size: szi.abs(),
+                entry_price,
+                mark_price,
+                unrealized_pnl,
+                leverage: leverage_val,
+            })
+        }).collect();
+
+        let ms = &state.margin_summary;
+        let total_balance = ms.account_value.parse::<f64>().unwrap_or(0.0);
+        let margin_used = ms.total_margin_used.parse::<f64>().unwrap_or(0.0);
+        let available = total_balance - margin_used;
+        let total_raw_usd = ms.total_raw_usd.parse::<f64>().unwrap_or(0.0);
+
+        let pnl = PnlSummary {
+            total_pnl: total_balance - total_raw_usd,
+            daily_pnl: 0.0,
+            total_balance,
+            available_balance: available,
+            margin_used,
+        };
+
+        Ok((positions, pnl))
+    }
+
+    /// Fetch open orders for a user
+    pub async fn fetch_open_orders(&self, address: H160) -> Result<Vec<OpenOrder>> {
+        let orders = self.client.open_orders(address).await?;
+
+        let result = orders.iter().map(|o| {
+            let side = if o.side == "B" { OrderSide::Buy } else { OrderSide::Sell };
+            OpenOrder {
+                id: o.oid.to_string(),
+                symbol: format!("{}-USD", o.coin),
+                side,
+                order_type: OrderType::Limit,
+                price: o.limit_px.parse::<f64>().unwrap_or(0.0),
+                size: o.sz.parse::<f64>().unwrap_or(0.0),
+                filled: 0.0,
+                timestamp: o.timestamp,
+            }
+        }).collect();
+
+        Ok(result)
+    }
+
+    /// Fetch user fill/trade history
+    pub async fn fetch_trade_history(&self, address: H160) -> Result<Vec<TradeHistory>> {
+        let fills = self.client.user_fills(address).await?;
+
+        let result = fills.iter().map(|f| {
+            let side = if f.side == "B" { OrderSide::Buy } else { OrderSide::Sell };
+            TradeHistory {
+                id: f.oid.to_string(),
+                symbol: format!("{}-USD", f.coin),
+                side,
+                price: f.px.parse::<f64>().unwrap_or(0.0),
+                size: f.sz.parse::<f64>().unwrap_or(0.0),
+                fee: f.fee.parse::<f64>().unwrap_or(0.0),
+                timestamp: f.time,
+            }
+        }).collect();
+
+        Ok(result)
+    }
+
+    /// Fetch user balances
+    pub async fn fetch_balances(&self, address: H160) -> Result<Vec<Balance>> {
+        let state = self.client.user_state(address).await?;
+        let ms = &state.margin_summary;
+        let total = ms.account_value.parse::<f64>().unwrap_or(0.0);
+        let margin = ms.total_margin_used.parse::<f64>().unwrap_or(0.0);
+
+        Ok(vec![Balance {
+            asset: "USDC".to_string(),
+            total,
+            available: total - margin,
+            in_margin: margin,
+        }])
     }
 }

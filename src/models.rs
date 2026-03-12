@@ -96,6 +96,17 @@ impl CandleInterval {
             Self::D1 => "1d",
         }
     }
+
+    pub fn to_sdk_string(&self) -> &'static str {
+        match self {
+            Self::M1 => "1m",
+            Self::M5 => "5m",
+            Self::M15 => "15m",
+            Self::H1 => "1h",
+            Self::H4 => "4h",
+            Self::D1 => "1d",
+        }
+    }
 }
 
 // === Account ===

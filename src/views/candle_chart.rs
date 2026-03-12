@@ -9,6 +9,9 @@ pub struct CandleChart {
     pub interval: CandleInterval,
     pub visible_count: usize,
     pub scroll_offset: usize,
+    pub show_ma7: bool,
+    pub show_ma25: bool,
+    pub show_ma99: bool,
 }
 
 impl CandleChart {
@@ -18,15 +21,27 @@ impl CandleChart {
             interval: CandleInterval::H1,
             visible_count: 60,
             scroll_offset: 0,
+            show_ma7: true,
+            show_ma25: true,
+            show_ma99: true,
         }
     }
 
-    fn visible_candles(&self) -> &[Candle] {
+    /// Returns the start..end index range into self.candles for visible candles.
+    fn visible_range(&self) -> (usize, usize) {
         if self.candles.is_empty() {
-            return &[];
+            return (0, 0);
         }
         let end = self.candles.len().saturating_sub(self.scroll_offset);
         let start = end.saturating_sub(self.visible_count);
+        (start, end)
+    }
+
+    fn visible_candles(&self) -> &[Candle] {
+        let (start, end) = self.visible_range();
+        if start == end {
+            return &[];
+        }
         &self.candles[start..end]
     }
 
@@ -49,12 +64,34 @@ impl CandleChart {
             .fold(0.0_f64, f64::max)
             .max(1.0)
     }
+
+    /// Calculate the simple moving average for all candles.
+    /// Returns a Vec with one entry per candle: None if not enough history,
+    /// Some(average) otherwise.
+    fn calculate_ma(&self, period: usize) -> Vec<Option<f64>> {
+        let len = self.candles.len();
+        let mut result = Vec::with_capacity(len);
+        let mut sum = 0.0;
+
+        for i in 0..len {
+            sum += self.candles[i].close;
+            if i >= period {
+                sum -= self.candles[i - period].close;
+            }
+            if i + 1 >= period {
+                result.push(Some(sum / period as f64));
+            } else {
+                result.push(None);
+            }
+        }
+
+        result
+    }
 }
 
 /// Render a single candlestick as a vertical column of divs.
 ///
-/// Since gpui 0.2 does not support absolute positioning, each candle is
-/// represented as a flex column with three sections stacked top-to-bottom:
+/// Each candle is represented as a flex column with sections stacked top-to-bottom:
 ///   1. Top spacer  (transparent, pushes content down from the top)
 ///   2. Upper wick  (thin colored bar from high to body top)
 ///   3. Body        (wide colored bar from open to close)
@@ -87,11 +124,6 @@ fn render_candle(
     let body_bottom_px = ((body_bottom - price_min) / price_range * chart_height as f64) as f32;
 
     // Section heights (from top of chart to bottom):
-    // top_spacer = chart_height - high_px (space above the high)
-    // upper_wick = high_px - body_top_px
-    // body = body_top_px - body_bottom_px
-    // lower_wick = body_bottom_px - low_px
-    // bottom_spacer = low_px (space below the low)
     let top_spacer = (chart_height - high_px).max(0.0);
     let upper_wick = (high_px - body_top_px).max(0.0);
     let body_h = (body_top_px - body_bottom_px).max(1.0);
@@ -118,6 +150,14 @@ fn render_candle(
         .child(div().w(px(candle_width)).h(px(bottom_spacer)))
 }
 
+/// MA indicator definition: period, color, show flag, label.
+struct MaIndicator {
+    period: usize,
+    color: u32,
+    show: bool,
+    label: &'static str,
+}
+
 impl Render for CandleChart {
     fn render(
         &mut self,
@@ -130,8 +170,96 @@ impl Render for CandleChart {
         let price_range = (price_max - price_min).max(0.01);
         let vol_max = self.volume_max();
         let visible = self.visible_candles().to_vec();
+        let (vis_start, vis_end) = self.visible_range();
         let candle_width: f32 = 8.0;
         let candle_gap: f32 = 2.0;
+        let chart_px_padding: f32 = 8.0;
+        let dot_size: f32 = 3.0;
+
+        // Calculate MA values for the full candle array
+        let ma_indicators = vec![
+            MaIndicator {
+                period: 7,
+                color: 0xffff00,
+                show: self.show_ma7,
+                label: "MA7",
+            },
+            MaIndicator {
+                period: 25,
+                color: 0x00aaff,
+                show: self.show_ma25,
+                label: "MA25",
+            },
+            MaIndicator {
+                period: 99,
+                color: 0xff00ff,
+                show: self.show_ma99,
+                label: "MA99",
+            },
+        ];
+
+        // Pre-calculate all MA vectors
+        let ma_values: Vec<(Vec<Option<f64>>, u32, bool)> = ma_indicators
+            .iter()
+            .map(|ind| (self.calculate_ma(ind.period), ind.color, ind.show))
+            .collect();
+
+        // Slice MA values for visible range and get last values for OHLCV bar
+        let ma_visible: Vec<(Vec<Option<f64>>, u32)> = ma_values
+            .iter()
+            .filter(|(_, _, show)| *show)
+            .map(|(vals, color, _)| (vals[vis_start..vis_end].to_vec(), *color))
+            .collect();
+
+        // Last visible MA values for OHLCV bar display
+        let ma_last_values: Vec<(&str, Option<f64>, u32)> = ma_indicators
+            .iter()
+            .zip(ma_values.iter())
+            .filter(|(ind, _)| ind.show)
+            .map(|(ind, (vals, _, _))| {
+                let last_val = if vis_end > 0 && vis_end <= vals.len() {
+                    vals[vis_end - 1]
+                } else {
+                    None
+                };
+                (ind.label, last_val, ind.color)
+            })
+            .collect();
+
+        // Build the MA overlay: absolute-positioned dots on top of the chart area
+        let mut ma_overlay = div()
+            .absolute()
+            .top_0()
+            .left_0()
+            .w_full()
+            .h(px(chart_height));
+
+        for (vals, color) in &ma_visible {
+            for (i, ma_val) in vals.iter().enumerate() {
+                if let Some(price) = ma_val {
+                    // Y position: distance from top of chart
+                    let y_from_bottom =
+                        ((price - price_min) / price_range * chart_height as f64) as f32;
+                    let y_from_top = chart_height - y_from_bottom - (dot_size / 2.0);
+                    // X position: same as candle column position
+                    let x = chart_px_padding
+                        + (i as f32) * (candle_width + candle_gap)
+                        + (candle_width / 2.0)
+                        - (dot_size / 2.0);
+
+                    ma_overlay = ma_overlay.child(
+                        div()
+                            .absolute()
+                            .top(px(y_from_top))
+                            .left(px(x))
+                            .w(px(dot_size))
+                            .h(px(dot_size))
+                            .rounded(px(dot_size / 2.0))
+                            .bg(rgb(*color)),
+                    );
+                }
+            }
+        }
 
         div()
             .w_full()
@@ -139,7 +267,7 @@ impl Render for CandleChart {
             .flex()
             .flex_col()
             .bg(rgb(0x1a1a2e))
-            // Toolbar: interval selector buttons
+            // Toolbar: interval selector buttons + MA toggles
             .child(
                 div()
                     .flex()
@@ -176,22 +304,76 @@ impl Render for CandleChart {
                                     this.interval = interval;
                                 }))
                         }),
-                    ),
+                    )
+                    // Separator
+                    .child(
+                        div()
+                            .w(px(1.))
+                            .h(px(16.))
+                            .mx(px(4.))
+                            .bg(rgb(0x0f3460)),
+                    )
+                    // MA toggle buttons
+                    .child({
+                        let active = self.show_ma7;
+                        Button::new("toggle-ma7")
+                            .label("MA7")
+                            .compact()
+                            .map(|b| if active { b.primary() } else { b.ghost() })
+                            .on_click(cx.listener(|this, _, _, _| {
+                                this.show_ma7 = !this.show_ma7;
+                            }))
+                    })
+                    .child({
+                        let active = self.show_ma25;
+                        Button::new("toggle-ma25")
+                            .label("MA25")
+                            .compact()
+                            .map(|b| if active { b.primary() } else { b.ghost() })
+                            .on_click(cx.listener(|this, _, _, _| {
+                                this.show_ma25 = !this.show_ma25;
+                            }))
+                    })
+                    .child({
+                        let active = self.show_ma99;
+                        Button::new("toggle-ma99")
+                            .label("MA99")
+                            .compact()
+                            .map(|b| if active { b.primary() } else { b.ghost() })
+                            .on_click(cx.listener(|this, _, _, _| {
+                                this.show_ma99 = !this.show_ma99;
+                            }))
+                    }),
             )
-            // OHLCV info bar showing last candle data
-            .child(self.render_ohlcv_bar(&visible))
-            // Main chart area: candlesticks
+            // OHLCV info bar showing last candle data + MA values
+            .child(self.render_ohlcv_bar(&visible, &ma_last_values))
+            // Main chart area: candlesticks + MA overlay
             .child(
                 div()
                     .h(px(chart_height))
                     .w_full()
-                    .flex()
-                    .items_end()
-                    .px(px(8.))
-                    .gap(px(candle_gap))
-                    .children(visible.iter().enumerate().map(|(i, candle)| {
-                        render_candle(i, candle, chart_height, price_min, price_range, candle_width)
-                    })),
+                    .relative()
+                    .child(
+                        div()
+                            .h(px(chart_height))
+                            .w_full()
+                            .flex()
+                            .items_end()
+                            .px(px(chart_px_padding))
+                            .gap(px(candle_gap))
+                            .children(visible.iter().enumerate().map(|(i, candle)| {
+                                render_candle(
+                                    i,
+                                    candle,
+                                    chart_height,
+                                    price_min,
+                                    price_range,
+                                    candle_width,
+                                )
+                            })),
+                    )
+                    // MA dots overlay
+                    .child(ma_overlay),
             )
             // Price axis labels
             .child(self.render_price_axis(price_min, price_max))
@@ -225,7 +407,11 @@ impl Render for CandleChart {
 }
 
 impl CandleChart {
-    fn render_ohlcv_bar(&self, visible: &[Candle]) -> impl IntoElement {
+    fn render_ohlcv_bar(
+        &self,
+        visible: &[Candle],
+        ma_values: &[(&str, Option<f64>, u32)],
+    ) -> impl IntoElement {
         let mut container = div()
             .flex()
             .items_center()
@@ -261,6 +447,29 @@ impl CandleChart {
                         )
                         .child(div().text_size(px(11.)).text_color(color).child(val)),
                 );
+            }
+
+            // MA values
+            for (label, val, color) in ma_values {
+                if let Some(v) = val {
+                    container = container.child(
+                        div()
+                            .flex()
+                            .gap(px(4.))
+                            .child(
+                                div()
+                                    .text_size(px(11.))
+                                    .text_color(rgb(*color))
+                                    .child(label.to_string()),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(11.))
+                                    .text_color(rgb(*color))
+                                    .child(format!("{:.2}", v)),
+                            ),
+                    );
+                }
             }
         }
 

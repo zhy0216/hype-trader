@@ -60,10 +60,10 @@ impl MainView {
         let order_book = cx.new(|_cx| OrderBookView::new());
 
         // Create OrderPanel
-        let order_panel = cx.new(|cx| OrderPanel::new(wallet_connected, window, cx));
+        let order_panel = cx.new(|cx| OrderPanel::new(wallet_connected, private_key.clone(), network, window, cx));
 
         // Create BottomPanel empty
-        let bottom_panel = cx.new(|cx| BottomPanel::new(window, cx));
+        let bottom_panel = cx.new(|cx| BottomPanel::new(private_key.clone(), network, window, cx));
 
         // Clone entity handles for the async task
         let symbol_list_clone = symbol_list.clone();

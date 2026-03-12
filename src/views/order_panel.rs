@@ -5,7 +5,9 @@ use gpui_component::input::{Input, InputState};
 
 use gpui_component::Disableable as _;
 
-use crate::models::{OrderSide, OrderType};
+use crate::models::{Network, OrderSide, OrderType};
+use crate::services::exchange_service::ExchangeService;
+use crate::services::wallet_service;
 
 pub struct OrderPanel {
     pub side: OrderSide,
@@ -14,10 +16,18 @@ pub struct OrderPanel {
     pub wallet_connected: bool,
     price_input: Entity<InputState>,
     size_input: Entity<InputState>,
+    private_key: Option<String>,
+    network: Network,
 }
 
 impl OrderPanel {
-    pub fn new(wallet_connected: bool, window: &mut gpui::Window, cx: &mut gpui::Context<Self>) -> Self {
+    pub fn new(
+        wallet_connected: bool,
+        private_key: Option<String>,
+        network: Network,
+        window: &mut gpui::Window,
+        cx: &mut gpui::Context<Self>,
+    ) -> Self {
         let price_input = cx.new(|cx| InputState::new(window, cx).placeholder("Price"));
         let size_input = cx.new(|cx| InputState::new(window, cx).placeholder("Size"));
         Self {
@@ -27,7 +37,17 @@ impl OrderPanel {
             wallet_connected,
             price_input,
             size_input,
+            private_key,
+            network,
         }
+    }
+
+    /// Strip the "-USD" suffix to get the coin name the SDK expects (e.g. "ETH").
+    fn sdk_coin(&self) -> String {
+        self.symbol
+            .strip_suffix("-USD")
+            .unwrap_or(&self.symbol)
+            .to_string()
     }
 }
 
@@ -181,7 +201,7 @@ impl Render for OrderPanel {
                     .child(Button::new("pct-75").label("75%").compact().ghost())
                     .child(Button::new("pct-100").label("100%").compact().ghost()),
             )
-            // Submit button (disabled in read-only mode)
+            // Submit button
             .child(
                 Button::new("submit-order")
                     .label(match self.side {
@@ -190,7 +210,102 @@ impl Render for OrderPanel {
                     })
                     .primary()
                     .w_full()
-                    .disabled(!self.wallet_connected),
+                    .disabled(!self.wallet_connected)
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        let Some(ref key) = this.private_key else {
+                            tracing::error!("No private key available for order submission");
+                            return;
+                        };
+
+                        // Read input values
+                        let size_str = this.size_input.read(cx).value().to_string();
+                        let size: f64 = match size_str.trim().parse() {
+                            Ok(v) if v > 0.0 => v,
+                            _ => {
+                                tracing::error!("Invalid size input: '{}'", size_str);
+                                return;
+                            }
+                        };
+
+                        let order_type = this.order_type;
+                        let is_buy = this.side == OrderSide::Buy;
+                        let coin = this.sdk_coin();
+                        let network = this.network;
+
+                        // For limit / trigger orders, parse price
+                        let price: Option<f64> = if order_type != OrderType::Market {
+                            let price_str = this.price_input.read(cx).value().to_string();
+                            match price_str.trim().parse() {
+                                Ok(v) if v > 0.0 => Some(v),
+                                _ => {
+                                    tracing::error!("Invalid price input: '{}'", price_str);
+                                    return;
+                                }
+                            }
+                        } else {
+                            None
+                        };
+
+                        let wallet = match wallet_service::wallet_from_key(key) {
+                            Ok(w) => w,
+                            Err(e) => {
+                                tracing::error!("Failed to create wallet: {}", e);
+                                return;
+                            }
+                        };
+
+                        // Clone input handles for clearing after success
+                        let price_input = this.price_input.clone();
+                        let size_input = this.size_input.clone();
+
+                        cx.spawn_in(window, async move |_this, cx| {
+                            let mut service = ExchangeService::new(network);
+                            if let Err(e) = service.connect(wallet).await {
+                                tracing::error!("Failed to connect ExchangeService: {}", e);
+                                return;
+                            }
+
+                            let result = match order_type {
+                                OrderType::Limit => {
+                                    service
+                                        .place_limit_order(&coin, is_buy, price.unwrap(), size, false)
+                                        .await
+                                }
+                                OrderType::Market => {
+                                    service.place_market_order(&coin, is_buy, size).await
+                                }
+                                OrderType::TakeProfit => {
+                                    service
+                                        .place_trigger_order(&coin, is_buy, price.unwrap(), size, true)
+                                        .await
+                                }
+                                OrderType::StopLoss => {
+                                    service
+                                        .place_trigger_order(&coin, is_buy, price.unwrap(), size, false)
+                                        .await
+                                }
+                            };
+
+                            match result {
+                                Ok(resp) => {
+                                    tracing::info!("Order placed successfully: {}", resp);
+                                    // Clear form inputs on success
+                                    let _ = cx.update(|window, cx| {
+                                        price_input.update(cx, |state, cx| {
+                                            state.set_value("", window, cx);
+                                        });
+                                        size_input.update(cx, |state, cx| {
+                                            state.set_value("", window, cx);
+                                        });
+                                    });
+                                }
+                                Err(e) => {
+                                    tracing::error!("Order placement failed: {}", e);
+                                }
+                            }
+                        })
+                        .detach();
+                    })),
             )
     }
 }

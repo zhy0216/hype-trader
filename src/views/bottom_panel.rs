@@ -4,6 +4,9 @@ use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::tab::{Tab, TabBar};
 
 use crate::models::*;
+use crate::services::exchange_service::ExchangeService;
+use crate::services::info_service::InfoService;
+use crate::services::wallet_service;
 
 pub struct BottomPanel {
     pub active_tab: BottomTab,
@@ -12,10 +15,17 @@ pub struct BottomPanel {
     pub trade_history: Vec<TradeHistory>,
     pub balances: Vec<Balance>,
     pub pnl: PnlSummary,
+    pub private_key: Option<String>,
+    pub network: Network,
 }
 
 impl BottomPanel {
-    pub fn new(_window: &mut gpui::Window, _cx: &mut gpui::Context<Self>) -> Self {
+    pub fn new(
+        private_key: Option<String>,
+        network: Network,
+        _window: &mut gpui::Window,
+        _cx: &mut gpui::Context<Self>,
+    ) -> Self {
         Self {
             active_tab: BottomTab::Positions,
             positions: Vec::new(),
@@ -23,6 +33,8 @@ impl BottomPanel {
             trade_history: Vec::new(),
             balances: Vec::new(),
             pnl: PnlSummary::default(),
+            private_key,
+            network,
         }
     }
 
@@ -33,6 +45,14 @@ impl BottomPanel {
             BottomTab::TradeHistory => 2,
             BottomTab::Funds => 3,
         }
+    }
+
+    /// Strip the "-USD" suffix to get the coin name the SDK expects (e.g. "ETH").
+    fn sdk_coin(symbol: &str) -> String {
+        symbol
+            .strip_suffix("-USD")
+            .unwrap_or(symbol)
+            .to_string()
     }
 }
 
@@ -77,8 +97,8 @@ impl Render for BottomPanel {
                     .id("bottom-panel-scroll")
                     .overflow_y_scroll()
                     .child(match self.active_tab {
-                        BottomTab::Positions => self.render_positions().into_any_element(),
-                        BottomTab::OpenOrders => self.render_orders().into_any_element(),
+                        BottomTab::Positions => self.render_positions(cx).into_any_element(),
+                        BottomTab::OpenOrders => self.render_orders(cx).into_any_element(),
                         BottomTab::TradeHistory => self.render_history().into_any_element(),
                         BottomTab::Funds => self.render_funds().into_any_element(),
                     }),
@@ -88,7 +108,9 @@ impl Render for BottomPanel {
 
 // Render helpers
 impl BottomPanel {
-    fn render_positions(&self) -> impl IntoElement {
+    fn render_positions(&self, cx: &mut gpui::Context<Self>) -> impl IntoElement {
+        let has_key = self.private_key.is_some();
+
         div()
             .w_full()
             .flex()
@@ -112,6 +134,13 @@ impl BottomPanel {
                     OrderSide::Buy => "Long",
                     OrderSide::Sell => "Short",
                 };
+
+                // Capture values for the close button click handler
+                let coin = Self::sdk_coin(&pos.symbol);
+                let size = pos.size;
+                let private_key = self.private_key.clone();
+                let network = self.network;
+
                 div()
                     .w_full()
                     .px(px(10.))
@@ -177,7 +206,41 @@ impl BottomPanel {
                             Button::new(SharedString::from(format!("close-{}", i)))
                                 .label("Close")
                                 .compact()
-                                .ghost(),
+                                .ghost()
+                                .when(has_key, |btn| {
+                                    btn.on_click(cx.listener(move |this, _, _window, cx| {
+                                        let Some(ref key) = private_key else { return; };
+                                        let wallet = match wallet_service::wallet_from_key(key) {
+                                            Ok(w) => w,
+                                            Err(e) => {
+                                                tracing::error!("Failed to create wallet: {}", e);
+                                                return;
+                                            }
+                                        };
+                                        let coin = coin.clone();
+                                        let network = network;
+                                        let private_key_for_refetch = this.private_key.clone();
+
+                                        cx.spawn(async move |this_handle, mut cx| {
+                                            let mut service = ExchangeService::new(network);
+                                            if let Err(e) = service.connect(wallet).await {
+                                                tracing::error!("Failed to connect ExchangeService: {}", e);
+                                                return;
+                                            }
+                                            if let Err(e) = service.market_close(&coin, Some(size)).await {
+                                                tracing::error!("Failed to close position {}: {}", coin, e);
+                                                return;
+                                            }
+                                            tracing::info!("Position {} closed successfully", coin);
+
+                                            // Re-fetch positions after close
+                                            if let Some(ref key) = private_key_for_refetch {
+                                                refetch_account_data(key, network, &this_handle, &mut cx).await;
+                                            }
+                                        })
+                                        .detach();
+                                    }))
+                                }),
                         ),
                     )
             }))
@@ -186,7 +249,9 @@ impl BottomPanel {
             })
     }
 
-    fn render_orders(&self) -> impl IntoElement {
+    fn render_orders(&self, cx: &mut gpui::Context<Self>) -> impl IntoElement {
+        let has_key = self.private_key.is_some();
+
         div()
             .w_full()
             .flex()
@@ -209,6 +274,13 @@ impl BottomPanel {
                     OrderType::TakeProfit => "TP",
                     OrderType::StopLoss => "SL",
                 };
+
+                // Capture values for the cancel button click handler
+                let coin = Self::sdk_coin(&order.symbol);
+                let oid: u64 = order.id.parse().unwrap_or(0);
+                let private_key = self.private_key.clone();
+                let network = self.network;
+
                 div()
                     .w_full()
                     .px(px(10.))
@@ -267,7 +339,41 @@ impl BottomPanel {
                             Button::new(SharedString::from(format!("cancel-{}", i)))
                                 .label("Cancel")
                                 .compact()
-                                .ghost(),
+                                .ghost()
+                                .when(has_key, |btn| {
+                                    btn.on_click(cx.listener(move |this, _, _window, cx| {
+                                        let Some(ref key) = private_key else { return; };
+                                        let wallet = match wallet_service::wallet_from_key(key) {
+                                            Ok(w) => w,
+                                            Err(e) => {
+                                                tracing::error!("Failed to create wallet: {}", e);
+                                                return;
+                                            }
+                                        };
+                                        let coin = coin.clone();
+                                        let network = network;
+                                        let private_key_for_refetch = this.private_key.clone();
+
+                                        cx.spawn(async move |this_handle, mut cx| {
+                                            let mut service = ExchangeService::new(network);
+                                            if let Err(e) = service.connect(wallet).await {
+                                                tracing::error!("Failed to connect ExchangeService: {}", e);
+                                                return;
+                                            }
+                                            if let Err(e) = service.cancel_order(&coin, oid).await {
+                                                tracing::error!("Failed to cancel order {} (oid {}): {}", coin, oid, e);
+                                                return;
+                                            }
+                                            tracing::info!("Order {} (oid {}) cancelled successfully", coin, oid);
+
+                                            // Re-fetch orders after cancel
+                                            if let Some(ref key) = private_key_for_refetch {
+                                                refetch_account_data(key, network, &this_handle, &mut cx).await;
+                                            }
+                                        })
+                                        .detach();
+                                    }))
+                                }),
                         ),
                     )
             }))
@@ -442,6 +548,56 @@ impl BottomPanel {
                     )
             }))
     }
+}
+
+/// Re-fetch positions, orders, and balances after a successful action.
+async fn refetch_account_data(
+    private_key: &str,
+    network: Network,
+    panel_handle: &gpui::WeakEntity<BottomPanel>,
+    cx: &mut gpui::AsyncApp,
+) {
+    let address = match wallet_service::address_from_key(private_key) {
+        Ok(addr) => addr,
+        Err(e) => {
+            tracing::error!("Failed to derive address for refetch: {}", e);
+            return;
+        }
+    };
+
+    let address_h160: ethers::types::H160 = match address.parse() {
+        Ok(a) => a,
+        Err(e) => {
+            tracing::error!("Failed to parse address: {}", e);
+            return;
+        }
+    };
+
+    let info = match InfoService::new(network).await {
+        Ok(i) => i,
+        Err(e) => {
+            tracing::error!("Failed to create InfoService for refetch: {}", e);
+            return;
+        }
+    };
+
+    // Fetch positions and PnL
+    let positions_result = info.fetch_user_state(address_h160).await;
+    let orders_result = info.fetch_open_orders(address_h160).await;
+    let balances_result = info.fetch_balances(address_h160).await;
+
+    let _ = panel_handle.update(cx, |panel, _cx| {
+        if let Ok((positions, pnl)) = positions_result {
+            panel.positions = positions;
+            panel.pnl = pnl;
+        }
+        if let Ok(orders) = orders_result {
+            panel.open_orders = orders;
+        }
+        if let Ok(balances) = balances_result {
+            panel.balances = balances;
+        }
+    });
 }
 
 fn table_header(headers: &[&str]) -> impl IntoElement {

@@ -3,24 +3,28 @@ use gpui::{div, px, rgb, Entity};
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::input::{Input, InputState};
 
+use gpui_component::Disableable as _;
+
 use crate::models::{OrderSide, OrderType};
 
 pub struct OrderPanel {
     pub side: OrderSide,
     pub order_type: OrderType,
     pub symbol: String,
+    pub wallet_connected: bool,
     price_input: Entity<InputState>,
     size_input: Entity<InputState>,
 }
 
 impl OrderPanel {
-    pub fn new(window: &mut gpui::Window, cx: &mut gpui::Context<Self>) -> Self {
+    pub fn new(wallet_connected: bool, window: &mut gpui::Window, cx: &mut gpui::Context<Self>) -> Self {
         let price_input = cx.new(|cx| InputState::new(window, cx).placeholder("Price"));
         let size_input = cx.new(|cx| InputState::new(window, cx).placeholder("Size"));
         Self {
             side: OrderSide::Buy,
             order_type: OrderType::Limit,
             symbol: "ETH-USD".to_string(),
+            wallet_connected,
             price_input,
             size_input,
         }
@@ -177,7 +181,7 @@ impl Render for OrderPanel {
                     .child(Button::new("pct-75").label("75%").compact().ghost())
                     .child(Button::new("pct-100").label("100%").compact().ghost()),
             )
-            // Submit button
+            // Submit button (disabled in read-only mode)
             .child(
                 Button::new("submit-order")
                     .label(match self.side {
@@ -185,7 +189,8 @@ impl Render for OrderPanel {
                         OrderSide::Sell => "Sell / Short",
                     })
                     .primary()
-                    .w_full(),
+                    .w_full()
+                    .disabled(!self.wallet_connected),
             )
     }
 }

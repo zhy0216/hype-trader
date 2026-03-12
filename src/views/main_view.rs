@@ -3,6 +3,7 @@ use gpui::{div, px, rgb, Entity};
 
 use crate::models::*;
 use crate::services::info_service::InfoService;
+use crate::services::wallet_service;
 use crate::views::bottom_panel::BottomPanel;
 use crate::views::candle_chart::CandleChart;
 use crate::views::order_book::OrderBookView;
@@ -20,15 +21,29 @@ pub struct MainView {
 }
 
 impl MainView {
-    pub fn new(window: &mut gpui::Window, cx: &mut gpui::Context<Self>) -> Self {
-        // Create TopBar with defaults (Connecting state, no address yet)
+    pub fn new(
+        private_key: Option<String>,
+        network: Network,
+        window: &mut gpui::Window,
+        cx: &mut gpui::Context<Self>,
+    ) -> Self {
+        let wallet_connected = private_key.is_some();
+
+        // Derive address from key if provided
+        let address: Option<String> = private_key.as_ref().and_then(|key| {
+            wallet_service::address_from_key(key)
+                .ok()
+                .map(|addr| wallet_service::format_address(&addr))
+        });
+
+        // Create TopBar with defaults (Connecting state, address if available)
         let top_bar = cx.new(|_cx| {
             TopBar::new(
-                Network::Mainnet,
+                network,
                 ConnectionStatus::Connecting,
                 ThemeMode::Dark,
                 0.0,
-                None,
+                address,
             )
         });
 
@@ -42,7 +57,7 @@ impl MainView {
         let order_book = cx.new(|_cx| OrderBookView::new());
 
         // Create OrderPanel
-        let order_panel = cx.new(|cx| OrderPanel::new(window, cx));
+        let order_panel = cx.new(|cx| OrderPanel::new(wallet_connected, window, cx));
 
         // Create BottomPanel empty
         let bottom_panel = cx.new(|cx| BottomPanel::new(window, cx));
@@ -56,7 +71,7 @@ impl MainView {
         // Spawn async task to fetch real data
         cx.spawn(async move |_this, cx| {
             // Create InfoService
-            let info = match InfoService::new(Network::Mainnet).await {
+            let info = match InfoService::new(network).await {
                 Ok(info) => info,
                 Err(e) => {
                     tracing::error!("Failed to create InfoService: {}", e);

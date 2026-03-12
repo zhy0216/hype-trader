@@ -4,23 +4,71 @@ mod state;
 mod views;
 
 use gpui::prelude::*;
-use gpui::{div, Application, Bounds, Entity, WindowBounds, WindowOptions};
+use gpui::{div, Application, Bounds, Entity, Subscription, WindowBounds, WindowOptions};
 use views::main_view::MainView;
+use views::welcome_view::{WelcomeEvent, WelcomeView};
+
+enum AppScreen {
+    Welcome(Entity<WelcomeView>),
+    Trading(Entity<MainView>),
+}
 
 struct HypeTrader {
-    main_view: Entity<MainView>,
+    screen: AppScreen,
+    _subscription: Option<Subscription>,
 }
 
 impl HypeTrader {
     fn new(window: &mut gpui::Window, cx: &mut gpui::Context<Self>) -> Self {
-        let main_view = cx.new(|cx| MainView::new(window, cx));
-        Self { main_view }
+        let welcome_view = cx.new(|cx| WelcomeView::new(window, cx));
+        let subscription =
+            cx.subscribe_in(&welcome_view, window, Self::on_welcome_event);
+        Self {
+            screen: AppScreen::Welcome(welcome_view),
+            _subscription: Some(subscription),
+        }
+    }
+
+    fn on_welcome_event(
+        &mut self,
+        _welcome: &Entity<WelcomeView>,
+        event: &WelcomeEvent,
+        window: &mut gpui::Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        match event {
+            WelcomeEvent::ConnectWallet {
+                private_key,
+                network,
+            } => {
+                let key = private_key.clone();
+                let net = *network;
+                let main_view =
+                    cx.new(|cx| MainView::new(Some(key), net, window, cx));
+                self.screen = AppScreen::Trading(main_view);
+                self._subscription = None;
+            }
+            WelcomeEvent::BrowseReadOnly { network } => {
+                let net = *network;
+                let main_view =
+                    cx.new(|cx| MainView::new(None, net, window, cx));
+                self.screen = AppScreen::Trading(main_view);
+                self._subscription = None;
+            }
+        }
     }
 }
 
 impl Render for HypeTrader {
-    fn render(&mut self, _window: &mut gpui::Window, _cx: &mut gpui::Context<Self>) -> impl IntoElement {
-        div().size_full().child(self.main_view.clone())
+    fn render(
+        &mut self,
+        _window: &mut gpui::Window,
+        _cx: &mut gpui::Context<Self>,
+    ) -> impl IntoElement {
+        match &self.screen {
+            AppScreen::Welcome(view) => div().size_full().child(view.clone()),
+            AppScreen::Trading(view) => div().size_full().child(view.clone()),
+        }
     }
 }
 

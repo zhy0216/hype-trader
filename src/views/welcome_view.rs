@@ -1,9 +1,20 @@
 use gpui::prelude::*;
-use gpui::{div, Entity};
+use gpui::{div, Entity, EventEmitter};
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::input::{Input, InputState};
 
 use crate::models::Network;
+use crate::services::wallet_service;
+
+/// Events emitted by WelcomeView to signal screen transitions.
+pub enum WelcomeEvent {
+    /// User connected with a valid wallet. Carries (private_key, network).
+    ConnectWallet { private_key: String, network: Network },
+    /// User chose read-only browsing. Carries the selected network.
+    BrowseReadOnly { network: Network },
+}
+
+impl EventEmitter<WelcomeEvent> for WelcomeView {}
 
 pub struct WelcomeView {
     network: Network,
@@ -145,7 +156,27 @@ impl Render for WelcomeView {
                         Button::new("connect")
                             .label("Connect Wallet")
                             .primary()
-                            .w_full(),
+                            .w_full()
+                            .on_click(cx.listener(|this, _, _w, cx| {
+                                let key_text = this.key_input.read(cx).value();
+                                let key_str = key_text.to_string().trim().to_string();
+                                if key_str.is_empty() {
+                                    this.error_message = Some("Please enter a private key.".into());
+                                    return;
+                                }
+                                match wallet_service::address_from_key(&key_str) {
+                                    Ok(_) => {
+                                        this.error_message = None;
+                                        cx.emit(WelcomeEvent::ConnectWallet {
+                                            private_key: key_str,
+                                            network: this.network,
+                                        });
+                                    }
+                                    Err(e) => {
+                                        this.error_message = Some(format!("Invalid key: {}", e));
+                                    }
+                                }
+                            })),
                     )
                     // Divider text
                     .child(
@@ -164,7 +195,12 @@ impl Render for WelcomeView {
                         Button::new("readonly")
                             .label("Browse Market (Read-only)")
                             .ghost()
-                            .w_full(),
+                            .w_full()
+                            .on_click(cx.listener(|this, _, _w, cx| {
+                                cx.emit(WelcomeEvent::BrowseReadOnly {
+                                    network: this.network,
+                                });
+                            })),
                     ),
             )
     }

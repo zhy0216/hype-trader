@@ -5,22 +5,22 @@ mod views;
 
 use gpui::prelude::*;
 use gpui::{div, Application, Bounds, Entity, WindowBounds, WindowOptions};
-use views::welcome_view::WelcomeView;
+use views::main_view::MainView;
 
 struct HypeTrader {
-    welcome_view: Entity<WelcomeView>,
+    main_view: Entity<MainView>,
 }
 
 impl HypeTrader {
     fn new(window: &mut gpui::Window, cx: &mut gpui::Context<Self>) -> Self {
-        let welcome_view = cx.new(|cx| WelcomeView::new(window, cx));
-        Self { welcome_view }
+        let main_view = cx.new(|cx| MainView::new(window, cx));
+        Self { main_view }
     }
 }
 
 impl Render for HypeTrader {
     fn render(&mut self, _window: &mut gpui::Window, _cx: &mut gpui::Context<Self>) -> impl IntoElement {
-        div().size_full().child(self.welcome_view.clone())
+        div().size_full().child(self.main_view.clone())
     }
 }
 

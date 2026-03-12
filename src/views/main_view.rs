@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use gpui::prelude::*;
 use gpui::{div, px, rgb, Entity};
 
@@ -115,110 +117,130 @@ impl MainView {
                 Err(e) => tracing::error!("Failed to fetch candles: {}", e),
             }
 
-            // Update top bar to connected
-            let _ = cx.update_entity(&top_bar_clone, |bar, _cx| {
-                bar.connection_status = ConnectionStatus::Connected;
-            });
+            // --- WebSocket real-time subscriptions with reconnect logic ---
+            let mut backoff_secs = 3u64;
+            loop {
+                // Set status to Connecting
+                let _ = cx.update_entity(&top_bar_clone, |bar, _cx| {
+                    bar.connection_status = ConnectionStatus::Connecting;
+                });
 
-            // --- WebSocket real-time subscriptions ---
-            let mut ws = match WsService::new(network).await {
-                Ok(ws) => ws,
-                Err(e) => {
-                    tracing::error!("Failed to create WsService: {}", e);
-                    return;
-                }
-            };
-
-            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<WsUpdate>();
-
-            // Subscribe to L2 book for the default symbol
-            if let Err(e) = ws.subscribe_l2_book("ETH", tx.clone()).await {
-                tracing::error!("Failed to subscribe to L2 book: {}", e);
-            }
-
-            // Subscribe to candles for default symbol + interval
-            if let Err(e) = ws.subscribe_candles("ETH", CandleInterval::H1, tx.clone()).await {
-                tracing::error!("Failed to subscribe to candles: {}", e);
-            }
-
-            // Subscribe to all mids for live price updates on symbol list
-            if let Err(e) = ws.subscribe_all_mids(tx.clone()).await {
-                tracing::error!("Failed to subscribe to all mids: {}", e);
-            }
-
-            // If wallet is connected, subscribe to user-specific feeds
-            if let Some(ref key) = pk_clone {
-                match wallet_service::address_from_key(key) {
-                    Ok(addr_str) => {
-                        match addr_str.parse::<ethers::types::H160>() {
-                            Ok(addr) => {
-                                if let Err(e) = ws.subscribe_order_updates(addr, tx.clone()).await {
-                                    tracing::error!("Failed to subscribe to order updates: {}", e);
-                                }
-                                if let Err(e) = ws.subscribe_user_fills(addr, tx.clone()).await {
-                                    tracing::error!("Failed to subscribe to user fills: {}", e);
-                                }
-                            }
-                            Err(e) => tracing::error!("Failed to parse address for WS subscriptions: {}", e),
-                        }
-                    }
-                    Err(e) => tracing::error!("Failed to derive address for WS subscriptions: {}", e),
-                }
-            }
-
-            tracing::info!("WebSocket subscriptions active, entering recv loop");
-
-            // Receive loop: route WsUpdate messages to UI entities.
-            // Keep `ws` alive in scope so subscriptions stay open.
-            while let Some(update) = rx.recv().await {
-                match update {
-                    WsUpdate::OrderBookUpdate(book) => {
-                        let _ = cx.update_entity(&order_book_clone, |view, _cx| {
-                            view.data = book;
+                let ws_result = WsService::new(network).await;
+                let mut ws = match ws_result {
+                    Ok(ws) => ws,
+                    Err(e) => {
+                        tracing::error!("WsService creation failed: {}", e);
+                        let _ = cx.update_entity(&top_bar_clone, |bar, _cx| {
+                            bar.connection_status = ConnectionStatus::Disconnected;
                         });
+                        tokio::time::sleep(Duration::from_secs(backoff_secs)).await;
+                        backoff_secs = (backoff_secs * 2).min(30);
+                        continue;
                     }
-                    WsUpdate::CandleUpdate(candle) => {
-                        let _ = cx.update_entity(&candle_chart_clone, |chart, _cx| {
-                            if let Some(last) = chart.candles.last() {
-                                if last.time == candle.time {
-                                    // Same candle period: replace the last candle
-                                    let len = chart.candles.len();
-                                    chart.candles[len - 1] = candle;
+                };
+
+                let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<WsUpdate>();
+
+                // Subscribe to L2 book for the default symbol
+                if let Err(e) = ws.subscribe_l2_book("ETH", tx.clone()).await {
+                    tracing::error!("Failed to subscribe to L2 book: {}", e);
+                }
+
+                // Subscribe to candles for default symbol + interval
+                if let Err(e) = ws.subscribe_candles("ETH", CandleInterval::H1, tx.clone()).await {
+                    tracing::error!("Failed to subscribe to candles: {}", e);
+                }
+
+                // Subscribe to all mids for live price updates on symbol list
+                if let Err(e) = ws.subscribe_all_mids(tx.clone()).await {
+                    tracing::error!("Failed to subscribe to all mids: {}", e);
+                }
+
+                // If wallet is connected, subscribe to user-specific feeds
+                if let Some(ref key) = pk_clone {
+                    match wallet_service::address_from_key(key) {
+                        Ok(addr_str) => {
+                            match addr_str.parse::<ethers::types::H160>() {
+                                Ok(addr) => {
+                                    if let Err(e) = ws.subscribe_order_updates(addr, tx.clone()).await {
+                                        tracing::error!("Failed to subscribe to order updates: {}", e);
+                                    }
+                                    if let Err(e) = ws.subscribe_user_fills(addr, tx.clone()).await {
+                                        tracing::error!("Failed to subscribe to user fills: {}", e);
+                                    }
+                                }
+                                Err(e) => tracing::error!("Failed to parse address for WS subscriptions: {}", e),
+                            }
+                        }
+                        Err(e) => tracing::error!("Failed to derive address for WS subscriptions: {}", e),
+                    }
+                }
+
+                // Set Connected and reset backoff on successful setup
+                let _ = cx.update_entity(&top_bar_clone, |bar, _cx| {
+                    bar.connection_status = ConnectionStatus::Connected;
+                });
+                backoff_secs = 3;
+
+                tracing::info!("WebSocket subscriptions active, entering recv loop");
+
+                // Receive loop: route WsUpdate messages to UI entities.
+                // Keep `ws` alive in scope so subscriptions stay open.
+                while let Some(update) = rx.recv().await {
+                    match update {
+                        WsUpdate::OrderBookUpdate(book) => {
+                            let _ = cx.update_entity(&order_book_clone, |view, _cx| {
+                                view.data = book;
+                            });
+                        }
+                        WsUpdate::CandleUpdate(candle) => {
+                            let _ = cx.update_entity(&candle_chart_clone, |chart, _cx| {
+                                if let Some(last) = chart.candles.last() {
+                                    if last.time == candle.time {
+                                        // Same candle period: replace the last candle
+                                        let len = chart.candles.len();
+                                        chart.candles[len - 1] = candle;
+                                    } else {
+                                        chart.candles.push(candle);
+                                    }
                                 } else {
                                     chart.candles.push(candle);
                                 }
-                            } else {
-                                chart.candles.push(candle);
-                            }
-                        });
-                    }
-                    WsUpdate::AllMids(mids) => {
-                        let _ = cx.update_entity(&symbol_list_clone, |list, _cx| {
-                            for symbol in &mut list.symbols {
-                                // Symbol base is the coin name (e.g. "ETH")
-                                if let Some(&price) = mids.get(&symbol.base) {
-                                    symbol.last_price = price;
+                            });
+                        }
+                        WsUpdate::AllMids(mids) => {
+                            let _ = cx.update_entity(&symbol_list_clone, |list, _cx| {
+                                for symbol in &mut list.symbols {
+                                    // Symbol base is the coin name (e.g. "ETH")
+                                    if let Some(&price) = mids.get(&symbol.base) {
+                                        symbol.last_price = price;
+                                    }
                                 }
-                            }
-                        });
-                    }
-                    WsUpdate::OrderUpdate(info) => {
-                        tracing::info!("Order update: {}", info);
-                    }
-                    WsUpdate::UserFill(fill) => {
-                        let _ = cx.update_entity(&bottom_panel_clone, |panel, _cx| {
-                            panel.trade_history.insert(0, fill);
-                        });
-                    }
-                    WsUpdate::TradesUpdate(_) => {
-                        // Not routed to UI currently
+                            });
+                        }
+                        WsUpdate::OrderUpdate(info) => {
+                            tracing::info!("Order update: {}", info);
+                        }
+                        WsUpdate::UserFill(fill) => {
+                            let _ = cx.update_entity(&bottom_panel_clone, |panel, _cx| {
+                                panel.trade_history.insert(0, fill);
+                            });
+                        }
+                        WsUpdate::TradesUpdate(_) => {
+                            // Not routed to UI currently
+                        }
                     }
                 }
-            }
 
-            // If we exit the loop, WS connection was lost
-            tracing::warn!("WebSocket recv loop ended, all senders dropped");
-            let _ = ws.unsubscribe_all().await;
+                // If we exit the recv loop, WS connection was lost
+                tracing::warn!("WebSocket disconnected, reconnecting in {}s...", backoff_secs);
+                let _ = ws.unsubscribe_all().await;
+                let _ = cx.update_entity(&top_bar_clone, |bar, _cx| {
+                    bar.connection_status = ConnectionStatus::Disconnected;
+                });
+                tokio::time::sleep(Duration::from_secs(backoff_secs)).await;
+                backoff_secs = (backoff_secs * 2).min(30);
+            }
         })
         .detach();
 

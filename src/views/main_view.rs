@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use gpui::prelude::*;
-use gpui::{div, px, rgb, Entity};
+use gpui::{div, px, rgb, Entity, Subscription};
 
 use crate::models::*;
 use crate::services::info_service::InfoService;
@@ -11,7 +11,7 @@ use crate::views::bottom_panel::BottomPanel;
 use crate::views::candle_chart::CandleChart;
 use crate::views::order_book::OrderBookView;
 use crate::views::order_panel::OrderPanel;
-use crate::views::symbol_list::SymbolList;
+use crate::views::symbol_list::{SymbolList, SymbolSelected};
 use crate::views::top_bar::TopBar;
 
 pub struct MainView {
@@ -24,6 +24,7 @@ pub struct MainView {
     wallet_connected: bool,
     pub private_key: Option<String>,
     pub network: Network,
+    _symbol_subscription: Subscription,
 }
 
 impl MainView {
@@ -67,6 +68,10 @@ impl MainView {
 
         // Create BottomPanel empty
         let bottom_panel = cx.new(|cx| BottomPanel::new(private_key.clone(), network, window, cx));
+
+        // Subscribe to symbol selection changes
+        let _symbol_subscription =
+            cx.subscribe_in(&symbol_list, window, Self::on_symbol_selected);
 
         // Clone entity handles for the async task
         let symbol_list_clone = symbol_list.clone();
@@ -254,7 +259,74 @@ impl MainView {
             wallet_connected,
             private_key,
             network,
+            _symbol_subscription,
         }
+    }
+
+    /// Called when the user selects a different symbol in the SymbolList.
+    /// Spawns an async task to re-fetch orderbook and candles for the new coin.
+    fn on_symbol_selected(
+        &mut self,
+        _symbol_list: &Entity<SymbolList>,
+        event: &SymbolSelected,
+        window: &mut gpui::Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let symbol_name = event.0.clone();
+        // Extract the base coin (e.g. "ETH" from "ETH-USD") for SDK calls
+        let coin = symbol_name
+            .strip_suffix("-USD")
+            .unwrap_or(&symbol_name)
+            .to_string();
+
+        tracing::info!("Symbol selected: {} (coin: {})", symbol_name, coin);
+
+        // Update order panel symbol
+        let order_panel = self.order_panel.clone();
+        cx.update_entity(&order_panel, |panel, _cx| {
+            panel.symbol = symbol_name;
+        });
+
+        // Clone entity handles for async task
+        let order_book_clone = self.order_book.clone();
+        let candle_chart_clone = self.candle_chart.clone();
+        let network = self.network;
+
+        // Spawn async task to re-fetch orderbook and candles for the new symbol
+        cx.spawn_in(window, async move |_this, cx| {
+            let info = match InfoService::new(network).await {
+                Ok(info) => info,
+                Err(e) => {
+                    tracing::error!("Failed to create InfoService for symbol switch: {}", e);
+                    return;
+                }
+            };
+
+            // Fetch orderbook
+            match info.fetch_orderbook(&coin).await {
+                Ok(book) => {
+                    let _ = cx.update(|_window, cx| {
+                        order_book_clone.update(cx, |view, _cx| {
+                            view.data = book;
+                        });
+                    });
+                }
+                Err(e) => tracing::error!("Failed to fetch orderbook for {}: {}", coin, e),
+            }
+
+            // Fetch candles
+            match info.fetch_candles(&coin, CandleInterval::H1, 100).await {
+                Ok(candles) => {
+                    let _ = cx.update(|_window, cx| {
+                        candle_chart_clone.update(cx, |chart, _cx| {
+                            chart.candles = candles;
+                        });
+                    });
+                }
+                Err(e) => tracing::error!("Failed to fetch candles for {}: {}", coin, e),
+            }
+        })
+        .detach();
     }
 }
 

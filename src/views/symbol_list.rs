@@ -1,8 +1,14 @@
 use gpui::prelude::*;
-use gpui::{div, px, rgb, Entity, SharedString};
+use gpui::{div, px, rgb, Entity, EventEmitter, SharedString};
 use gpui_component::input::{Input, InputState};
 
 use crate::models::Symbol;
+
+/// Emitted when the user clicks a symbol in the list.
+/// Carries the full symbol name (e.g. "ETH-USD").
+pub struct SymbolSelected(pub String);
+
+impl EventEmitter<SymbolSelected> for SymbolList {}
 
 pub struct SymbolList {
     pub symbols: Vec<Symbol>,
@@ -93,8 +99,9 @@ impl Render for SymbolList {
                                 rgb(0x16213e)
                             })
                             .hover(|s| s.bg(rgb(0x1a3a6e)))
-                            .on_click(cx.listener(move |this, _, _w, _cx| {
+                            .on_click(cx.listener(move |this, _, _w, cx| {
                                 this.selected = sym_name.clone();
+                                cx.emit(SymbolSelected(sym_name.clone()));
                             }))
                             // Left: symbol name
                             .child(

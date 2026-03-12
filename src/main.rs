@@ -1,4 +1,5 @@
 mod models;
+mod services;
 mod state;
 
 use gpui::prelude::*;

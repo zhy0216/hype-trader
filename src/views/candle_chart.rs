@@ -633,10 +633,12 @@ impl Render for CandleChart {
                     // zoom in
                     (old_count as i32 - zoom_step).max(20) as usize
                 };
-                // Adjust scroll_offset proportionally to keep center stable
+                // Adjust scroll_offset to keep the center candle stable
                 if old_count > 0 && new_count != old_count {
-                    let center_ratio = this.scroll_offset as f64 / old_count as f64;
-                    this.scroll_offset = (center_ratio * new_count as f64).round() as usize;
+                    let right_edge = this.candles.len().saturating_sub(this.scroll_offset);
+                    let center_candle = right_edge.saturating_sub(old_count / 2);
+                    let new_right_edge = center_candle + new_count / 2;
+                    this.scroll_offset = this.candles.len().saturating_sub(new_right_edge);
                 }
                 this.visible_count = new_count;
                 this.clamp_scroll_offset();
@@ -662,8 +664,8 @@ impl Render for CandleChart {
                     let cw = this.candle_width();
                     let candle_step = cw + 2.0; // candle_gap = 2.0
                     let candle_delta = (delta_x / candle_step) as isize;
-                    // Dragging right = going back in time = increase offset
-                    let new_offset = this.drag_start_offset as isize + candle_delta;
+                    // Dragging right = revealing newer data = decrease offset
+                    let new_offset = this.drag_start_offset as isize - candle_delta;
                     this.scroll_offset = new_offset.max(0) as usize;
                     this.clamp_scroll_offset();
                 }

@@ -12,6 +12,9 @@ pub struct CandleChart {
     pub show_ma7: bool,
     pub show_ma25: bool,
     pub show_ma99: bool,
+    pub show_bb: bool,
+    pub show_macd: bool,
+    pub show_rsi: bool,
 }
 
 impl CandleChart {
@@ -24,6 +27,9 @@ impl CandleChart {
             show_ma7: true,
             show_ma25: true,
             show_ma99: true,
+            show_bb: false,
+            show_macd: false,
+            show_rsi: false,
         }
     }
 
@@ -82,6 +88,198 @@ impl CandleChart {
                 result.push(Some(sum / period as f64));
             } else {
                 result.push(None);
+            }
+        }
+
+        result
+    }
+
+    /// Calculate Bollinger Bands (middle, upper, lower) for all candles.
+    /// Middle = SMA(period), Upper = SMA + mult * stddev, Lower = SMA - mult * stddev
+    fn calculate_bollinger(
+        &self,
+        period: usize,
+        std_dev_mult: f64,
+    ) -> Vec<(Option<f64>, Option<f64>, Option<f64>)> {
+        let len = self.candles.len();
+        let ma = self.calculate_ma(period);
+        let mut result = Vec::with_capacity(len);
+
+        for i in 0..len {
+            if let Some(sma) = ma[i] {
+                // Calculate standard deviation over the last `period` candles
+                let start = if i + 1 >= period { i + 1 - period } else { 0 };
+                let slice = &self.candles[start..=i];
+                let variance: f64 = slice
+                    .iter()
+                    .map(|c| {
+                        let diff = c.close - sma;
+                        diff * diff
+                    })
+                    .sum::<f64>()
+                    / period as f64;
+                let std_dev = variance.sqrt();
+                let upper = sma + std_dev_mult * std_dev;
+                let lower = sma - std_dev_mult * std_dev;
+                result.push((Some(sma), Some(upper), Some(lower)));
+            } else {
+                result.push((None, None, None));
+            }
+        }
+
+        result
+    }
+
+    /// Calculate Exponential Moving Average for all candles.
+    /// Uses SMA of first `period` values as initial EMA, then applies
+    /// multiplier = 2 / (period + 1).
+    fn calculate_ema(&self, period: usize) -> Vec<Option<f64>> {
+        let len = self.candles.len();
+        if len == 0 || period == 0 {
+            return vec![None; len];
+        }
+        let mut result = Vec::with_capacity(len);
+        let multiplier = 2.0 / (period as f64 + 1.0);
+
+        // Fill None until we have enough data for SMA seed
+        for _ in 0..len.min(period.saturating_sub(1)) {
+            result.push(None);
+        }
+
+        if len < period {
+            return result;
+        }
+
+        // SMA of first `period` values as seed
+        let sma: f64 = self.candles[..period].iter().map(|c| c.close).sum::<f64>() / period as f64;
+        result.push(Some(sma));
+
+        let mut prev_ema = sma;
+        for i in period..len {
+            let ema = self.candles[i].close * multiplier + prev_ema * (1.0 - multiplier);
+            result.push(Some(ema));
+            prev_ema = ema;
+        }
+
+        result
+    }
+
+    /// Calculate MACD: (macd_line, signal_line, histogram) for all candles.
+    /// MACD Line = EMA(12) - EMA(26)
+    /// Signal Line = EMA(9) of MACD Line
+    /// Histogram = MACD Line - Signal Line
+    fn calculate_macd(&self) -> Vec<(Option<f64>, Option<f64>, Option<f64>)> {
+        let len = self.candles.len();
+        let ema12 = self.calculate_ema(12);
+        let ema26 = self.calculate_ema(26);
+
+        // MACD line = EMA12 - EMA26
+        let mut macd_line: Vec<Option<f64>> = Vec::with_capacity(len);
+        for i in 0..len {
+            match (ema12[i], ema26[i]) {
+                (Some(e12), Some(e26)) => macd_line.push(Some(e12 - e26)),
+                _ => macd_line.push(None),
+            }
+        }
+
+        // Signal line = EMA(9) of MACD line values
+        // We need to compute EMA manually on the macd_line values
+        let signal_period: usize = 9;
+        let multiplier = 2.0 / (signal_period as f64 + 1.0);
+        let mut signal_line: Vec<Option<f64>> = vec![None; len];
+
+        // Find the first run of `signal_period` consecutive Some values in macd_line
+        let mut first_valid_run_start = None;
+        let mut consecutive = 0usize;
+        for i in 0..len {
+            if macd_line[i].is_some() {
+                consecutive += 1;
+                if consecutive >= signal_period && first_valid_run_start.is_none() {
+                    first_valid_run_start = Some(i + 1 - signal_period);
+                }
+            } else {
+                consecutive = 0;
+            }
+        }
+
+        if let Some(start) = first_valid_run_start {
+            // SMA seed for signal
+            let sma: f64 = (start..start + signal_period)
+                .map(|i| macd_line[i].unwrap())
+                .sum::<f64>()
+                / signal_period as f64;
+            let seed_idx = start + signal_period - 1;
+            signal_line[seed_idx] = Some(sma);
+            let mut prev = sma;
+            for i in (seed_idx + 1)..len {
+                if let Some(m) = macd_line[i] {
+                    let s = m * multiplier + prev * (1.0 - multiplier);
+                    signal_line[i] = Some(s);
+                    prev = s;
+                }
+            }
+        }
+
+        // Histogram = MACD - Signal
+        let mut result = Vec::with_capacity(len);
+        for i in 0..len {
+            let hist = match (macd_line[i], signal_line[i]) {
+                (Some(m), Some(s)) => Some(m - s),
+                _ => None,
+            };
+            result.push((macd_line[i], signal_line[i], hist));
+        }
+
+        result
+    }
+
+    /// Calculate RSI using Wilder's smoothing method.
+    /// Returns values 0-100 for each candle (None if not enough history).
+    fn calculate_rsi(&self, period: usize) -> Vec<Option<f64>> {
+        let len = self.candles.len();
+        if len < 2 || period == 0 {
+            return vec![None; len];
+        }
+
+        let mut result = vec![None; len];
+
+        // Calculate price changes
+        let mut gains = Vec::with_capacity(len);
+        let mut losses = Vec::with_capacity(len);
+        gains.push(0.0);
+        losses.push(0.0);
+        for i in 1..len {
+            let change = self.candles[i].close - self.candles[i - 1].close;
+            gains.push(change.max(0.0));
+            losses.push((-change).max(0.0));
+        }
+
+        if len <= period {
+            return result;
+        }
+
+        // Initial SMA of gains/losses over first `period` changes (indices 1..=period)
+        let mut avg_gain: f64 = gains[1..=period].iter().sum::<f64>() / period as f64;
+        let mut avg_loss: f64 = losses[1..=period].iter().sum::<f64>() / period as f64;
+
+        // RSI at index `period`
+        if avg_loss == 0.0 {
+            result[period] = Some(100.0);
+        } else {
+            let rs = avg_gain / avg_loss;
+            result[period] = Some(100.0 - (100.0 / (1.0 + rs)));
+        }
+
+        // Wilder's smoothing for subsequent values
+        for i in (period + 1)..len {
+            avg_gain = (avg_gain * (period as f64 - 1.0) + gains[i]) / period as f64;
+            avg_loss = (avg_loss * (period as f64 - 1.0) + losses[i]) / period as f64;
+
+            if avg_loss == 0.0 {
+                result[i] = Some(100.0);
+            } else {
+                let rs = avg_gain / avg_loss;
+                result[i] = Some(100.0 - (100.0 / (1.0 + rs)));
             }
         }
 
@@ -166,6 +364,8 @@ impl Render for CandleChart {
     ) -> impl IntoElement {
         let chart_height: f32 = 400.0;
         let volume_height: f32 = 80.0;
+        let macd_height: f32 = 80.0;
+        let rsi_height: f32 = 60.0;
         let (price_min, price_max) = self.price_range();
         let price_range = (price_max - price_min).max(0.01);
         let vol_max = self.volume_max();
@@ -261,13 +461,116 @@ impl Render for CandleChart {
             }
         }
 
+        // Bollinger Bands overlay
+        let show_bb = self.show_bb;
+        let bb_visible: Vec<(Option<f64>, Option<f64>, Option<f64>)> = if show_bb {
+            let bb_all = self.calculate_bollinger(20, 2.0);
+            bb_all
+                .get(vis_start..vis_end)
+                .unwrap_or(&[])
+                .to_vec()
+        } else {
+            Vec::new()
+        };
+
+        let mut bb_overlay = div()
+            .absolute()
+            .top_0()
+            .left_0()
+            .w_full()
+            .h(px(chart_height));
+
+        if show_bb {
+            for (i, (middle, upper, lower)) in bb_visible.iter().enumerate() {
+                let x = chart_px_padding
+                    + (i as f32) * (candle_width + candle_gap)
+                    + (candle_width / 2.0)
+                    - (dot_size / 2.0);
+
+                // Middle band: gray
+                if let Some(price) = middle {
+                    let y_from_bottom =
+                        ((price - price_min) / price_range * chart_height as f64) as f32;
+                    let y_from_top = chart_height - y_from_bottom - (dot_size / 2.0);
+                    bb_overlay = bb_overlay.child(
+                        div()
+                            .absolute()
+                            .top(px(y_from_top))
+                            .left(px(x))
+                            .w(px(dot_size))
+                            .h(px(dot_size))
+                            .rounded(px(dot_size / 2.0))
+                            .bg(rgb(0x888888)),
+                    );
+                }
+
+                // Upper band: muted blue (semi-transparent appearance)
+                if let Some(price) = upper {
+                    let y_from_bottom =
+                        ((price - price_min) / price_range * chart_height as f64) as f32;
+                    let y_from_top = chart_height - y_from_bottom - (dot_size / 2.0);
+                    bb_overlay = bb_overlay.child(
+                        div()
+                            .absolute()
+                            .top(px(y_from_top))
+                            .left(px(x))
+                            .w(px(dot_size))
+                            .h(px(dot_size))
+                            .rounded(px(dot_size / 2.0))
+                            .bg(rgb(0x2a5599)),
+                    );
+                }
+
+                // Lower band: muted blue (semi-transparent appearance)
+                if let Some(price) = lower {
+                    let y_from_bottom =
+                        ((price - price_min) / price_range * chart_height as f64) as f32;
+                    let y_from_top = chart_height - y_from_bottom - (dot_size / 2.0);
+                    bb_overlay = bb_overlay.child(
+                        div()
+                            .absolute()
+                            .top(px(y_from_top))
+                            .left(px(x))
+                            .w(px(dot_size))
+                            .h(px(dot_size))
+                            .rounded(px(dot_size / 2.0))
+                            .bg(rgb(0x2a5599)),
+                    );
+                }
+            }
+        }
+
+        // MACD data
+        let show_macd = self.show_macd;
+        let macd_visible: Vec<(Option<f64>, Option<f64>, Option<f64>)> = if show_macd {
+            let macd_all = self.calculate_macd();
+            macd_all
+                .get(vis_start..vis_end)
+                .unwrap_or(&[])
+                .to_vec()
+        } else {
+            Vec::new()
+        };
+
+        // RSI data
+        let show_rsi = self.show_rsi;
+        let rsi_visible: Vec<Option<f64>> = if show_rsi {
+            let rsi_all = self.calculate_rsi(14);
+            rsi_all
+                .get(vis_start..vis_end)
+                .unwrap_or(&[])
+                .to_vec()
+        } else {
+            Vec::new()
+        };
+
         div()
             .w_full()
             .h_full()
             .flex()
             .flex_col()
             .bg(rgb(0x1a1a2e))
-            // Toolbar: interval selector buttons + MA toggles
+            // Toolbar: interval selector buttons + MA toggles + indicator toggles
             .child(
                 div()
                     .flex()
@@ -343,11 +646,52 @@ impl Render for CandleChart {
                             .on_click(cx.listener(|this, _, _, _| {
                                 this.show_ma99 = !this.show_ma99;
                             }))
+                    })
+                    // Separator before indicator toggles
+                    .child(
+                        div()
+                            .w(px(1.))
+                            .h(px(16.))
+                            .mx(px(4.))
+                            .bg(rgb(0x0f3460)),
+                    )
+                    // BB toggle
+                    .child({
+                        let active = self.show_bb;
+                        Button::new("toggle-bb")
+                            .label("BB")
+                            .compact()
+                            .map(|b| if active { b.primary() } else { b.ghost() })
+                            .on_click(cx.listener(|this, _, _, _| {
+                                this.show_bb = !this.show_bb;
+                            }))
+                    })
+                    // MACD toggle
+                    .child({
+                        let active = self.show_macd;
+                        Button::new("toggle-macd")
+                            .label("MACD")
+                            .compact()
+                            .map(|b| if active { b.primary() } else { b.ghost() })
+                            .on_click(cx.listener(|this, _, _, _| {
+                                this.show_macd = !this.show_macd;
+                            }))
+                    })
+                    // RSI toggle
+                    .child({
+                        let active = self.show_rsi;
+                        Button::new("toggle-rsi")
+                            .label("RSI")
+                            .compact()
+                            .map(|b| if active { b.primary() } else { b.ghost() })
+                            .on_click(cx.listener(|this, _, _, _| {
+                                this.show_rsi = !this.show_rsi;
+                            }))
                     }),
             )
             // OHLCV info bar showing last candle data + MA values
             .child(self.render_ohlcv_bar(&visible, &ma_last_values))
-            // Main chart area: candlesticks + MA overlay
+            // Main chart area: candlesticks + MA overlay + BB overlay
             .child(
                 div()
                     .h(px(chart_height))
@@ -373,7 +717,9 @@ impl Render for CandleChart {
                             })),
                     )
                     // MA dots overlay
-                    .child(ma_overlay),
+                    .child(ma_overlay)
+                    // Bollinger Bands overlay
+                    .when(show_bb, |el| el.child(bb_overlay)),
             )
             // Price axis labels
             .child(self.render_price_axis(price_min, price_max))
@@ -403,6 +749,28 @@ impl Render for CandleChart {
                             .bg(color)
                     })),
             )
+            // MACD sub-chart
+            .when(show_macd, |el| {
+                el.child(self.render_macd_chart(
+                    &macd_visible,
+                    macd_height,
+                    candle_width,
+                    candle_gap,
+                    chart_px_padding,
+                    dot_size,
+                ))
+            })
+            // RSI sub-chart
+            .when(show_rsi, |el| {
+                el.child(self.render_rsi_chart(
+                    &rsi_visible,
+                    rsi_height,
+                    candle_width,
+                    candle_gap,
+                    chart_px_padding,
+                    dot_size,
+                ))
+            })
     }
 }
 
@@ -489,5 +857,251 @@ impl CandleChart {
                     .text_color(rgb(0x666666))
                     .child(format!("{:.2}", price))
             }))
+    }
+
+    /// Render the MACD sub-chart with histogram bars, MACD line, and signal line.
+    fn render_macd_chart(
+        &self,
+        macd_visible: &[(Option<f64>, Option<f64>, Option<f64>)],
+        height: f32,
+        candle_width: f32,
+        candle_gap: f32,
+        chart_px_padding: f32,
+        dot_size: f32,
+    ) -> impl IntoElement {
+        // Find the value range for MACD scaling
+        let mut macd_min = f64::MAX;
+        let mut macd_max = f64::MIN;
+        for (macd_line, signal, histogram) in macd_visible {
+            for v in [macd_line, signal, histogram] {
+                if let Some(val) = v {
+                    macd_min = macd_min.min(*val);
+                    macd_max = macd_max.max(*val);
+                }
+            }
+        }
+        if macd_min >= macd_max {
+            macd_min = -1.0;
+            macd_max = 1.0;
+        }
+        // Add padding
+        let range = macd_max - macd_min;
+        macd_min -= range * 0.05;
+        macd_max += range * 0.05;
+        let macd_range = macd_max - macd_min;
+
+        // The zero line position
+        let zero_y = height - (((0.0 - macd_min) / macd_range) * height as f64) as f32;
+
+        // Build MACD overlay with lines and histogram
+        let mut macd_overlay = div()
+            .absolute()
+            .top_0()
+            .left_0()
+            .w_full()
+            .h(px(height));
+
+        // Zero line
+        macd_overlay = macd_overlay.child(
+            div()
+                .absolute()
+                .top(px(zero_y.clamp(0.0, height - 1.0)))
+                .left_0()
+                .w_full()
+                .h(px(1.0))
+                .bg(rgb(0x333333)),
+        );
+
+        for (i, (macd_line, signal, histogram)) in macd_visible.iter().enumerate() {
+            let x = chart_px_padding
+                + (i as f32) * (candle_width + candle_gap)
+                + (candle_width / 2.0);
+
+            // Histogram bar
+            if let Some(hist) = histogram {
+                let color = if *hist >= 0.0 {
+                    rgb(0x00ff88)
+                } else {
+                    rgb(0xff4444)
+                };
+                let val_y =
+                    height - (((*hist - macd_min) / macd_range) * height as f64) as f32;
+                let bar_top = val_y.min(zero_y);
+                let bar_h = (val_y - zero_y).abs().max(1.0);
+                macd_overlay = macd_overlay.child(
+                    div()
+                        .absolute()
+                        .top(px(bar_top))
+                        .left(px(x - candle_width / 2.0))
+                        .w(px(candle_width))
+                        .h(px(bar_h))
+                        .bg(color),
+                );
+            }
+
+            // MACD line dot
+            if let Some(val) = macd_line {
+                let y = height - (((val - macd_min) / macd_range) * height as f64) as f32
+                    - (dot_size / 2.0);
+                macd_overlay = macd_overlay.child(
+                    div()
+                        .absolute()
+                        .top(px(y))
+                        .left(px(x - dot_size / 2.0))
+                        .w(px(dot_size))
+                        .h(px(dot_size))
+                        .rounded(px(dot_size / 2.0))
+                        .bg(rgb(0x00aaff)),
+                );
+            }
+
+            // Signal line dot
+            if let Some(val) = signal {
+                let y = height - (((val - macd_min) / macd_range) * height as f64) as f32
+                    - (dot_size / 2.0);
+                macd_overlay = macd_overlay.child(
+                    div()
+                        .absolute()
+                        .top(px(y))
+                        .left(px(x - dot_size / 2.0))
+                        .w(px(dot_size))
+                        .h(px(dot_size))
+                        .rounded(px(dot_size / 2.0))
+                        .bg(rgb(0xff6600)),
+                );
+            }
+        }
+
+        div()
+            .h(px(height))
+            .w_full()
+            .relative()
+            .border_t_1()
+            .border_color(rgb(0x0f3460))
+            // Label
+            .child(
+                div()
+                    .absolute()
+                    .top(px(2.0))
+                    .left(px(4.0))
+                    .text_size(px(10.))
+                    .text_color(rgb(0x666666))
+                    .child("MACD"),
+            )
+            .child(macd_overlay)
+    }
+
+    /// Render the RSI sub-chart with the RSI line and reference lines at 30/70.
+    fn render_rsi_chart(
+        &self,
+        rsi_visible: &[Option<f64>],
+        height: f32,
+        candle_width: f32,
+        candle_gap: f32,
+        chart_px_padding: f32,
+        dot_size: f32,
+    ) -> impl IntoElement {
+        // RSI is always 0-100
+        let rsi_min: f64 = 0.0;
+        let rsi_max: f64 = 100.0;
+        let rsi_range = rsi_max - rsi_min;
+
+        let mut rsi_overlay = div()
+            .absolute()
+            .top_0()
+            .left_0()
+            .w_full()
+            .h(px(height));
+
+        // Reference line at 70 (overbought)
+        let y70 = height - (((70.0 - rsi_min) / rsi_range) * height as f64) as f32;
+        rsi_overlay = rsi_overlay.child(
+            div()
+                .absolute()
+                .top(px(y70))
+                .left_0()
+                .w_full()
+                .h(px(1.0))
+                .bg(rgb(0x333333)),
+        );
+
+        // Reference line at 30 (oversold)
+        let y30 = height - (((30.0 - rsi_min) / rsi_range) * height as f64) as f32;
+        rsi_overlay = rsi_overlay.child(
+            div()
+                .absolute()
+                .top(px(y30))
+                .left_0()
+                .w_full()
+                .h(px(1.0))
+                .bg(rgb(0x333333)),
+        );
+
+        // RSI line dots
+        for (i, rsi_val) in rsi_visible.iter().enumerate() {
+            if let Some(val) = rsi_val {
+                let x = chart_px_padding
+                    + (i as f32) * (candle_width + candle_gap)
+                    + (candle_width / 2.0)
+                    - (dot_size / 2.0);
+                let y = height - (((val - rsi_min) / rsi_range) * height as f64) as f32
+                    - (dot_size / 2.0);
+                rsi_overlay = rsi_overlay.child(
+                    div()
+                        .absolute()
+                        .top(px(y))
+                        .left(px(x))
+                        .w(px(dot_size))
+                        .h(px(dot_size))
+                        .rounded(px(dot_size / 2.0))
+                        .bg(rgb(0xffaa00)),
+                );
+            }
+        }
+
+        // Get last RSI value for label
+        let last_rsi = rsi_visible.iter().rev().find_map(|v| *v);
+        let rsi_label = match last_rsi {
+            Some(v) => format!("RSI(14) {:.1}", v),
+            None => "RSI(14)".to_string(),
+        };
+
+        div()
+            .h(px(height))
+            .w_full()
+            .relative()
+            .border_t_1()
+            .border_color(rgb(0x0f3460))
+            // Label with value
+            .child(
+                div()
+                    .absolute()
+                    .top(px(2.0))
+                    .left(px(4.0))
+                    .text_size(px(10.))
+                    .text_color(rgb(0x666666))
+                    .child(rsi_label),
+            )
+            // 70 label
+            .child(
+                div()
+                    .absolute()
+                    .top(px(y70 - 10.0))
+                    .right(px(4.0))
+                    .text_size(px(9.))
+                    .text_color(rgb(0x444444))
+                    .child("70"),
+            )
+            // 30 label
+            .child(
+                div()
+                    .absolute()
+                    .top(px(y30 - 10.0))
+                    .right(px(4.0))
+                    .text_size(px(9.))
+                    .text_color(rgb(0x444444))
+                    .child("30"),
+            )
+            .child(rsi_overlay)
     }
 }

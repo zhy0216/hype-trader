@@ -1,12 +1,11 @@
 use aes_gcm::aead::Aead;
 use aes_gcm::{Aes256Gcm, Key, KeyInit, Nonce};
 use anyhow::{Context, Result, bail};
+use ethers::signers::Signer;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use rand::RngCore;
 use sha2::{Digest, Sha256};
-use std::str::FromStr;
-
 /// Derives a 32-byte encryption key from a password using SHA-256.
 pub fn derive_encryption_key(password: &str) -> [u8; 32] {
     let mut hasher = Sha256::new();
@@ -67,9 +66,17 @@ pub fn decrypt_key(encrypted: &str, password: &str) -> Result<String> {
 /// Returns a checksummed 0x-prefixed address.
 pub fn address_from_key(private_key: &str) -> Result<String> {
     let key = private_key.strip_prefix("0x").unwrap_or(private_key);
-    let signer = alloy::signers::local::PrivateKeySigner::from_str(key)
+    let wallet: ethers::signers::LocalWallet = key.parse()
         .context("invalid private key")?;
-    Ok(format!("{:?}", signer.address()))
+    Ok(format!("{:?}", wallet.address()))
+}
+
+/// Creates a `LocalWallet` from a hex private key string for SDK use.
+pub fn wallet_from_key(private_key: &str) -> Result<ethers::signers::LocalWallet> {
+    let key = private_key.strip_prefix("0x").unwrap_or(private_key);
+    let wallet: ethers::signers::LocalWallet = key.parse()
+        .context("invalid private key")?;
+    Ok(wallet)
 }
 
 /// Formats an address for display: "0x1234...abcd" (first 6 + last 4 chars).

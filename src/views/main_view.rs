@@ -12,6 +12,7 @@ use crate::views::candle_chart::CandleChart;
 use crate::views::order_book::OrderBookView;
 use crate::views::order_panel::OrderPanel;
 use crate::views::symbol_list::{SymbolList, SymbolSelected};
+use crate::views::toast::{Toast, ToastKind};
 use crate::views::top_bar::TopBar;
 
 pub struct MainView {
@@ -21,6 +22,8 @@ pub struct MainView {
     order_book: Entity<OrderBookView>,
     order_panel: Entity<OrderPanel>,
     bottom_panel: Entity<BottomPanel>,
+    toast: Entity<Toast>,
+    is_loading: bool,
     wallet_connected: bool,
     pub private_key: Option<String>,
     pub network: Network,
@@ -43,6 +46,9 @@ impl MainView {
                 .map(|addr| wallet_service::format_address(&addr))
         });
 
+        // Create Toast entity (shared with child panels)
+        let toast = cx.new(|_cx| Toast::new());
+
         // Create TopBar with defaults (Connecting state, address if available)
         let top_bar = cx.new(|_cx| {
             TopBar::new(
@@ -63,11 +69,11 @@ impl MainView {
         // Create OrderBook empty
         let order_book = cx.new(|_cx| OrderBookView::new());
 
-        // Create OrderPanel
-        let order_panel = cx.new(|cx| OrderPanel::new(wallet_connected, private_key.clone(), network, window, cx));
+        // Create OrderPanel (pass toast handle)
+        let order_panel = cx.new(|cx| OrderPanel::new(wallet_connected, private_key.clone(), network, toast.clone(), window, cx));
 
-        // Create BottomPanel empty
-        let bottom_panel = cx.new(|cx| BottomPanel::new(private_key.clone(), network, window, cx));
+        // Create BottomPanel empty (pass toast handle)
+        let bottom_panel = cx.new(|cx| BottomPanel::new(private_key.clone(), network, toast.clone(), window, cx));
 
         // Subscribe to symbol selection changes
         let _symbol_subscription =
@@ -79,10 +85,11 @@ impl MainView {
         let order_book_clone = order_book.clone();
         let top_bar_clone = top_bar.clone();
         let bottom_panel_clone = bottom_panel.clone();
+        let toast_clone = toast.clone();
         let pk_clone = private_key.clone();
 
         // Spawn async task to fetch real data, then start WebSocket subscriptions
-        cx.spawn(async move |_this, cx| {
+        cx.spawn(async move |this, cx| {
             // Create InfoService
             let info = match InfoService::new(network).await {
                 Ok(info) => info,
@@ -121,6 +128,12 @@ impl MainView {
                 }
                 Err(e) => tracing::error!("Failed to fetch candles: {}", e),
             }
+
+            // Initial data loaded, hide loading overlay
+            let _ = this.update(cx, |view, cx| {
+                view.is_loading = false;
+                cx.notify();
+            });
 
             // --- WebSocket real-time subscriptions with reconnect logic ---
             let mut backoff_secs = 3u64;
@@ -185,6 +198,12 @@ impl MainView {
                 let _ = cx.update_entity(&top_bar_clone, |bar, _cx| {
                     bar.connection_status = ConnectionStatus::Connected;
                 });
+                // Show reconnected toast (only after a reconnect, not the first connect)
+                if backoff_secs > 3 {
+                    let _ = cx.update_entity(&toast_clone, |t, cx| {
+                        t.show("Reconnected", ToastKind::Success, cx);
+                    });
+                }
                 backoff_secs = 3;
 
                 tracing::info!("WebSocket subscriptions active, entering recv loop");
@@ -243,6 +262,9 @@ impl MainView {
                 let _ = cx.update_entity(&top_bar_clone, |bar, _cx| {
                     bar.connection_status = ConnectionStatus::Disconnected;
                 });
+                let _ = cx.update_entity(&toast_clone, |t, cx| {
+                    t.show("Connection lost", ToastKind::Info, cx);
+                });
                 tokio::time::sleep(Duration::from_secs(backoff_secs)).await;
                 backoff_secs = (backoff_secs * 2).min(30);
             }
@@ -256,6 +278,8 @@ impl MainView {
             order_book,
             order_panel,
             bottom_panel,
+            toast,
+            is_loading: true,
             wallet_connected,
             private_key,
             network,
@@ -336,13 +360,18 @@ impl Render for MainView {
         _window: &mut gpui::Window,
         _cx: &mut gpui::Context<Self>,
     ) -> impl IntoElement {
+        let is_loading = self.is_loading;
+
         div()
             .size_full()
             .flex()
             .flex_col()
             .bg(rgb(0x1a1a2e))
+            .relative()
             // TopBar
             .child(self.top_bar.clone())
+            // Toast notification (below TopBar, above content)
+            .child(self.toast.clone())
             // Main content area (flex row)
             .child(
                 div()
@@ -368,5 +397,25 @@ impl Render for MainView {
             )
             // BottomPanel
             .child(div().h(px(250.)).child(self.bottom_panel.clone()))
+            // Loading overlay
+            .when(is_loading, |el| {
+                el.child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .size_full()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .bg(rgb(0x1a1a2e))
+                        .child(
+                            div()
+                                .text_color(rgb(0xcccccc))
+                                .text_size(px(18.))
+                                .child("Loading..."),
+                        ),
+                )
+            })
     }
 }

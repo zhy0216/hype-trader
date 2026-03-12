@@ -1,5 +1,5 @@
 use gpui::prelude::*;
-use gpui::{div, px, rgb, SharedString};
+use gpui::{div, px, rgb, Entity, SharedString};
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::tab::{Tab, TabBar};
 
@@ -7,6 +7,7 @@ use crate::models::*;
 use crate::services::exchange_service::ExchangeService;
 use crate::services::info_service::InfoService;
 use crate::services::wallet_service;
+use crate::views::toast::{Toast, ToastKind};
 
 pub struct BottomPanel {
     pub active_tab: BottomTab,
@@ -17,12 +18,14 @@ pub struct BottomPanel {
     pub pnl: PnlSummary,
     pub private_key: Option<String>,
     pub network: Network,
+    toast: Entity<Toast>,
 }
 
 impl BottomPanel {
     pub fn new(
         private_key: Option<String>,
         network: Network,
+        toast: Entity<Toast>,
         _window: &mut gpui::Window,
         _cx: &mut gpui::Context<Self>,
     ) -> Self {
@@ -35,6 +38,7 @@ impl BottomPanel {
             pnl: PnlSummary::default(),
             private_key,
             network,
+            toast,
         }
     }
 
@@ -220,6 +224,7 @@ impl BottomPanel {
                                         let coin = coin.clone();
                                         let network = network;
                                         let private_key_for_refetch = this.private_key.clone();
+                                        let toast = this.toast.clone();
 
                                         cx.spawn(async move |this_handle, mut cx| {
                                             let mut service = ExchangeService::new(network);
@@ -229,9 +234,15 @@ impl BottomPanel {
                                             }
                                             if let Err(e) = service.market_close(&coin, Some(size)).await {
                                                 tracing::error!("Failed to close position {}: {}", coin, e);
+                                                let _ = cx.update_entity(&toast, |t: &mut Toast, cx| {
+                                                    t.show(format!("Failed to close position: {}", e), ToastKind::Error, cx);
+                                                });
                                                 return;
                                             }
                                             tracing::info!("Position {} closed successfully", coin);
+                                            let _ = cx.update_entity(&toast, |t: &mut Toast, cx| {
+                                                t.show("Position closed", ToastKind::Success, cx);
+                                            });
 
                                             // Re-fetch positions after close
                                             if let Some(ref key) = private_key_for_refetch {
@@ -353,6 +364,7 @@ impl BottomPanel {
                                         let coin = coin.clone();
                                         let network = network;
                                         let private_key_for_refetch = this.private_key.clone();
+                                        let toast = this.toast.clone();
 
                                         cx.spawn(async move |this_handle, mut cx| {
                                             let mut service = ExchangeService::new(network);
@@ -362,9 +374,15 @@ impl BottomPanel {
                                             }
                                             if let Err(e) = service.cancel_order(&coin, oid).await {
                                                 tracing::error!("Failed to cancel order {} (oid {}): {}", coin, oid, e);
+                                                let _ = cx.update_entity(&toast, |t: &mut Toast, cx| {
+                                                    t.show(format!("Failed to cancel order: {}", e), ToastKind::Error, cx);
+                                                });
                                                 return;
                                             }
                                             tracing::info!("Order {} (oid {}) cancelled successfully", coin, oid);
+                                            let _ = cx.update_entity(&toast, |t: &mut Toast, cx| {
+                                                t.show("Order cancelled", ToastKind::Success, cx);
+                                            });
 
                                             // Re-fetch orders after cancel
                                             if let Some(ref key) = private_key_for_refetch {

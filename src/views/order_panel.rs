@@ -8,6 +8,7 @@ use gpui_component::Disableable as _;
 use crate::models::{Network, OrderSide, OrderType};
 use crate::services::exchange_service::ExchangeService;
 use crate::services::wallet_service;
+use crate::views::toast::{Toast, ToastKind};
 
 pub struct OrderPanel {
     pub side: OrderSide,
@@ -18,6 +19,7 @@ pub struct OrderPanel {
     size_input: Entity<InputState>,
     private_key: Option<String>,
     network: Network,
+    toast: Entity<Toast>,
 }
 
 impl OrderPanel {
@@ -25,6 +27,7 @@ impl OrderPanel {
         wallet_connected: bool,
         private_key: Option<String>,
         network: Network,
+        toast: Entity<Toast>,
         window: &mut gpui::Window,
         cx: &mut gpui::Context<Self>,
     ) -> Self {
@@ -39,6 +42,7 @@ impl OrderPanel {
             size_input,
             private_key,
             network,
+            toast,
         }
     }
 
@@ -257,6 +261,7 @@ impl Render for OrderPanel {
                         // Clone input handles for clearing after success
                         let price_input = this.price_input.clone();
                         let size_input = this.size_input.clone();
+                        let toast = this.toast.clone();
 
                         cx.spawn_in(window, async move |_this, cx| {
                             let mut service = ExchangeService::new(network);
@@ -297,10 +302,18 @@ impl Render for OrderPanel {
                                         size_input.update(cx, |state, cx| {
                                             state.set_value("", window, cx);
                                         });
+                                        toast.update(cx, |t, cx| {
+                                            t.show("Order placed successfully", ToastKind::Success, cx);
+                                        });
                                     });
                                 }
                                 Err(e) => {
                                     tracing::error!("Order placement failed: {}", e);
+                                    let _ = cx.update(|_window, cx| {
+                                        toast.update(cx, |t, cx| {
+                                            t.show(format!("Failed to place order: {}", e), ToastKind::Error, cx);
+                                        });
+                                    });
                                 }
                             }
                         })

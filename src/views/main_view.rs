@@ -18,6 +18,9 @@ pub struct MainView {
     order_book: Entity<OrderBookView>,
     order_panel: Entity<OrderPanel>,
     bottom_panel: Entity<BottomPanel>,
+    wallet_connected: bool,
+    pub private_key: Option<String>,
+    pub network: Network,
 }
 
 impl MainView {
@@ -123,6 +126,9 @@ impl MainView {
             order_book,
             order_panel,
             bottom_panel,
+            wallet_connected,
+            private_key,
+            network,
         }
     }
 }
@@ -147,7 +153,7 @@ impl Render for MainView {
                     .flex()
                     // Left: SymbolList
                     .child(self.symbol_list.clone())
-                    // Center: Chart + Order panel
+                    // Center: Chart + Order panel (if wallet connected)
                     .child(
                         div()
                             .flex_1()
@@ -155,8 +161,10 @@ impl Render for MainView {
                             .flex_col()
                             // Chart
                             .child(div().flex_1().child(self.candle_chart.clone()))
-                            // Order Panel
-                            .child(self.order_panel.clone()),
+                            // Order Panel (only when wallet is connected)
+                            .when(self.wallet_connected, |el| {
+                                el.child(self.order_panel.clone())
+                            }),
                     )
                     // Right: OrderBook
                     .child(self.order_book.clone()),

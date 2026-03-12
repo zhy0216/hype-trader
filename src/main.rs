@@ -36,26 +36,15 @@ impl HypeTrader {
         window: &mut gpui::Window,
         cx: &mut gpui::Context<Self>,
     ) {
-        match event {
-            WelcomeEvent::ConnectWallet {
-                private_key,
-                network,
-            } => {
-                let key = private_key.clone();
-                let net = *network;
-                let main_view =
-                    cx.new(|cx| MainView::new(Some(key), net, window, cx));
-                self.screen = AppScreen::Trading(main_view);
-                self._subscription = None;
+        let (key, net) = match event {
+            WelcomeEvent::ConnectWallet { private_key, network } => {
+                (Some(private_key.clone()), *network)
             }
-            WelcomeEvent::BrowseReadOnly { network } => {
-                let net = *network;
-                let main_view =
-                    cx.new(|cx| MainView::new(None, net, window, cx));
-                self.screen = AppScreen::Trading(main_view);
-                self._subscription = None;
-            }
-        }
+            WelcomeEvent::BrowseReadOnly { network } => (None, *network),
+        };
+        let main_view = cx.new(|cx| MainView::new(key, net, window, cx));
+        self.screen = AppScreen::Trading(main_view);
+        self._subscription = None;
     }
 }
 

@@ -1,20 +1,26 @@
 mod models;
 mod services;
 mod state;
+mod views;
 
 use gpui::prelude::*;
-use gpui::{Application, WindowOptions, WindowBounds, Bounds};
+use gpui::{div, Application, Bounds, Entity, WindowBounds, WindowOptions};
+use views::welcome_view::WelcomeView;
 
-struct HypeTrader;
+struct HypeTrader {
+    welcome_view: Entity<WelcomeView>,
+}
+
+impl HypeTrader {
+    fn new(window: &mut gpui::Window, cx: &mut gpui::Context<Self>) -> Self {
+        let welcome_view = cx.new(|cx| WelcomeView::new(window, cx));
+        Self { welcome_view }
+    }
+}
 
 impl Render for HypeTrader {
     fn render(&mut self, _window: &mut gpui::Window, _cx: &mut gpui::Context<Self>) -> impl IntoElement {
-        gpui::div()
-            .size_full()
-            .flex()
-            .items_center()
-            .justify_center()
-            .child("Hype Trader - Loading...")
+        div().size_full().child(self.welcome_view.clone())
     }
 }
 
@@ -32,7 +38,7 @@ fn main() {
                 ..Default::default()
             },
             |window, cx| {
-                let inner_view = cx.new(|_cx| HypeTrader);
+                let inner_view = cx.new(|cx| HypeTrader::new(window, cx));
                 cx.new(|cx| gpui_component::Root::new(inner_view, window, cx))
             },
         )

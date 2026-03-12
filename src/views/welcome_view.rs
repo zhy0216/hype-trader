@@ -176,7 +176,7 @@ impl WelcomeView {
             .child(
                 div()
                     .text_size(gpui::px(13.))
-                    .text_color(gpui::rgb(0xaaaaaa))
+                    .text_color(gpui::rgb(0xdddddd))
                     .child("Network"),
             )
             .child(
@@ -191,7 +191,7 @@ impl WelcomeView {
                                 if self.network == Network::Mainnet {
                                     btn.primary()
                                 } else {
-                                    btn.ghost()
+                                    btn.outline().text_color(gpui::hsla(0., 0., 0.8, 1.))
                                 }
                             })
                             .on_click(cx.listener(|this, _, _w, _cx| {
@@ -206,7 +206,7 @@ impl WelcomeView {
                                 if self.network == Network::Testnet {
                                     btn.primary()
                                 } else {
-                                    btn.ghost()
+                                    btn.outline().text_color(gpui::hsla(0., 0., 0.8, 1.))
                                 }
                             })
                             .on_click(cx.listener(|this, _, _w, _cx| {
@@ -242,7 +242,7 @@ impl WelcomeView {
                     .child(
                         div()
                             .text_size(gpui::px(13.))
-                            .text_color(gpui::rgb(0xaaaaaa))
+                            .text_color(gpui::rgb(0xdddddd))
                             .child("Password"),
                     )
                     .child(Input::new(&self.password_input)),
@@ -265,8 +265,9 @@ impl WelcomeView {
                     .child(
                         Button::new("use-different")
                             .label("Use a different wallet")
-                            .ghost()
+                            .outline()
                             .compact()
+                            .text_color(gpui::hsla(0., 0., 0.75, 1.))
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.mode = WelcomeMode::Fresh;
                                 this.saved_encrypted_key = None;
@@ -296,7 +297,7 @@ impl WelcomeView {
                     .child(
                         div()
                             .text_size(gpui::px(13.))
-                            .text_color(gpui::rgb(0xaaaaaa))
+                            .text_color(gpui::rgb(0xdddddd))
                             .child("Private Key"),
                     )
                     .child(Input::new(&self.key_input)),
@@ -315,7 +316,7 @@ impl WelcomeView {
                                 if self.remember {
                                     btn.primary()
                                 } else {
-                                    btn.ghost()
+                                    btn.outline().text_color(gpui::hsla(0., 0., 0.8, 1.))
                                 }
                             })
                             .on_click(cx.listener(|this, _, _w, _cx| {
@@ -333,7 +334,7 @@ impl WelcomeView {
                         .child(
                             div()
                                 .text_size(gpui::px(13.))
-                                .text_color(gpui::rgb(0xaaaaaa))
+                                .text_color(gpui::rgb(0xdddddd))
                                 .child("Encryption Password"),
                         )
                         .child(Input::new(&self.password_input)),
@@ -365,9 +366,9 @@ impl Render for WelcomeView {
                     .w(gpui::px(420.))
                     .p(gpui::px(32.))
                     .rounded(gpui::px(12.))
-                    .bg(gpui::rgb(0x16213e))
+                    .bg(gpui::rgb(0x1c2a4a))
                     .border_1()
-                    .border_color(gpui::rgb(0x0f3460))
+                    .border_color(gpui::rgb(0x1a4a80))
                     .flex()
                     .flex_col()
                     .gap(gpui::px(20.))
@@ -391,7 +392,7 @@ impl Render for WelcomeView {
                             .child(
                                 div()
                                     .text_size(gpui::px(13.))
-                                    .text_color(gpui::rgb(0x888888))
+                                    .text_color(gpui::rgb(0xc8c8c8))
                                     .child("Hyperliquid Trading Client"),
                             ),
                     )
@@ -421,7 +422,7 @@ impl Render for WelcomeView {
                             .child(
                                 div()
                                     .text_size(gpui::px(12.))
-                                    .text_color(gpui::rgb(0x666666))
+                                    .text_color(gpui::rgb(0xaaaaaa))
                                     .child("or"),
                             ),
                     )
@@ -429,8 +430,9 @@ impl Render for WelcomeView {
                     .child(
                         Button::new("readonly")
                             .label("Browse Market (Read-only)")
-                            .ghost()
+                            .outline()
                             .w_full()
+                            .text_color(gpui::hsla(0., 0., 0.75, 1.))
                             .on_click(cx.listener(|this, _, _w, cx| {
                                 cx.emit(WelcomeEvent::BrowseReadOnly {
                                     network: this.network,

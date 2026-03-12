@@ -8,6 +8,9 @@ use gpui::{div, Application, Bounds, Entity, Subscription, WindowBounds, WindowO
 use views::main_view::MainView;
 use views::welcome_view::{WelcomeEvent, WelcomeView};
 
+use models::AppConfig;
+use services::config_service;
+
 enum AppScreen {
     Welcome(Entity<WelcomeView>),
     Trading(Entity<MainView>),
@@ -19,8 +22,9 @@ struct HypeTrader {
 }
 
 impl HypeTrader {
-    fn new(window: &mut gpui::Window, cx: &mut gpui::Context<Self>) -> Self {
-        let welcome_view = cx.new(|cx| WelcomeView::new(window, cx));
+    fn new(config: AppConfig, window: &mut gpui::Window, cx: &mut gpui::Context<Self>) -> Self {
+        let welcome_view =
+            cx.new(|cx| WelcomeView::new_with_config(Some(config), window, cx));
         let subscription =
             cx.subscribe_in(&welcome_view, window, Self::on_welcome_event);
         Self {
@@ -65,7 +69,13 @@ fn main() {
     let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
     let _guard = rt.enter();
 
-    Application::new().run(|cx| {
+    // Load config once at startup (before the UI event loop).
+    let config = config_service::load_config().unwrap_or_else(|e| {
+        eprintln!("Warning: failed to load config, using defaults: {}", e);
+        AppConfig::default()
+    });
+
+    Application::new().run(move |cx| {
         gpui_component::init(cx);
 
         cx.open_window(
@@ -78,7 +88,8 @@ fn main() {
                 ..Default::default()
             },
             |window, cx| {
-                let inner_view = cx.new(|cx| HypeTrader::new(window, cx));
+                let inner_view =
+                    cx.new(|cx| HypeTrader::new(config.clone(), window, cx));
                 cx.new(|cx| gpui_component::Root::new(inner_view, window, cx))
             },
         )

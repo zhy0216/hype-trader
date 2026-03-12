@@ -25,6 +25,9 @@ impl Render for HypeTrader {
 }
 
 fn main() {
+    let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
+    let _guard = rt.enter();
+
     Application::new().run(|cx| {
         gpui_component::init(cx);
 

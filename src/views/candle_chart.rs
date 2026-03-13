@@ -4,7 +4,7 @@ use std::rc::Rc;
 use gpui::prelude::*;
 use gpui::{canvas, div, px, rgb, Bounds, MouseButton, Point, Pixels, ScrollDelta, SharedString};
 
-use crate::components::theme::{bg_primary, border_primary, text_dimmest, text_dim, text_disabled, color_green, color_red};
+use crate::components::theme::{bg_primary, border_primary, border_accent, text_dimmest, text_dim, text_muted, text_secondary, text_disabled, color_green, color_red};
 use crate::components::toggle_button::toggle_button;
 use crate::models::{Candle, CandleInterval};
 
@@ -694,9 +694,9 @@ impl Render for CandleChart {
                 div()
                     .flex()
                     .items_center()
-                    .gap(px(4.))
-                    .px(px(8.))
-                    .py(px(6.))
+                    .gap(px(2.))
+                    .px(px(12.))
+                    .py(px(8.))
                     .border_b_1()
                     .border_color(border_primary())
                     .children(
@@ -722,9 +722,9 @@ impl Render for CandleChart {
                     .child(
                         div()
                             .w(px(1.))
-                            .h(px(16.))
-                            .mx(px(4.))
-                            .bg(border_primary()),
+                            .h(px(18.))
+                            .mx(px(8.))
+                            .bg(border_accent()),
                     )
                     // MA toggle buttons
                     .child({
@@ -752,9 +752,9 @@ impl Render for CandleChart {
                     .child(
                         div()
                             .w(px(1.))
-                            .h(px(16.))
-                            .mx(px(4.))
-                            .bg(border_primary()),
+                            .h(px(18.))
+                            .mx(px(8.))
+                            .bg(border_accent()),
                     )
                     // BB toggle
                     .child({
@@ -894,46 +894,46 @@ impl Render for CandleChart {
                                 let c = &visible[candle_idx];
                                 let is_bullish = c.close >= c.open;
                                 let color = if is_bullish { 0x22c55e } else { 0xef4444 };
-                                let tooltip_x = (local_x + 12.0).min(total_chart_width - 140.0).max(0.0);
-                                let tooltip_y = (local_y + 12.0).min(chart_height - 80.0).max(0.0);
+                                let tooltip_x = (local_x + 12.0).min(total_chart_width - 160.0).max(0.0);
+                                let tooltip_y = (local_y + 12.0).min(chart_height - 100.0).max(0.0);
 
                                 crosshair = crosshair.child(
                                     div()
                                         .absolute()
                                         .top(px(tooltip_y))
                                         .left(px(tooltip_x))
-                                        .bg(gpui::rgba(0x151822ee))
+                                        .bg(gpui::rgba(0x151822f0))
                                         .border_1()
-                                        .border_color(rgb(0x2d3348))
-                                        .rounded(px(4.0))
-                                        .px(px(6.0))
-                                        .py(px(4.0))
+                                        .border_color(rgb(0x3d4560))
+                                        .rounded(px(6.0))
+                                        .px(px(10.0))
+                                        .py(px(8.0))
                                         .flex()
                                         .flex_col()
-                                        .gap(px(1.0))
-                                        .text_size(px(10.0))
+                                        .gap(px(4.0))
+                                        .text_size(px(12.0))
                                         .child(
-                                            div().text_color(text_dimmest())
+                                            div().text_color(text_muted())
                                                 .child(format_candle_time(c.time, current_interval))
                                         )
                                         .child(
-                                            div().flex().gap(px(4.0))
-                                                .child(div().text_color(text_dimmest()).child("O"))
+                                            div().flex().gap(px(8.0))
+                                                .child(div().text_color(text_muted()).child("O"))
                                                 .child(div().text_color(rgb(color)).child(format!("{:.2}", c.open)))
-                                                .child(div().text_color(text_dimmest()).child("H"))
+                                                .child(div().text_color(text_muted()).child("H"))
                                                 .child(div().text_color(rgb(color)).child(format!("{:.2}", c.high)))
                                         )
                                         .child(
-                                            div().flex().gap(px(4.0))
-                                                .child(div().text_color(text_dimmest()).child("L"))
+                                            div().flex().gap(px(8.0))
+                                                .child(div().text_color(text_muted()).child("L"))
                                                 .child(div().text_color(rgb(color)).child(format!("{:.2}", c.low)))
-                                                .child(div().text_color(text_dimmest()).child("C"))
+                                                .child(div().text_color(text_muted()).child("C"))
                                                 .child(div().text_color(rgb(color)).child(format!("{:.2}", c.close)))
                                         )
                                         .child(
-                                            div().flex().gap(px(4.0))
-                                                .child(div().text_color(text_dimmest()).child("Vol"))
-                                                .child(div().text_color(text_dim()).child(format!("{:.0}", c.volume)))
+                                            div().flex().gap(px(8.0))
+                                                .child(div().text_color(text_muted()).child("Vol"))
+                                                .child(div().text_color(text_secondary()).child(format!("{:.0}", c.volume)))
                                         ),
                                 );
                             }
@@ -1029,8 +1029,8 @@ impl CandleChart {
             .flex()
             .items_center()
             .gap(px(16.))
-            .px(px(8.))
-            .py(px(4.));
+            .px(px(12.))
+            .py(px(6.));
 
         if let Some(c) = visible.last() {
             let price_color = if c.close >= c.open {
@@ -1040,11 +1040,11 @@ impl CandleChart {
             };
 
             let entries: Vec<(&str, String, gpui::Rgba)> = vec![
-                ("O", format!("{:.2}", c.open), text_dim()),
-                ("H", format!("{:.2}", c.high), text_dim()),
-                ("L", format!("{:.2}", c.low), text_dim()),
+                ("O", format!("{:.2}", c.open), text_secondary()),
+                ("H", format!("{:.2}", c.high), text_secondary()),
+                ("L", format!("{:.2}", c.low), text_secondary()),
                 ("C", format!("{:.2}", c.close), price_color),
-                ("Vol", format!("{:.0}", c.volume), text_dim()),
+                ("Vol", format!("{:.0}", c.volume), text_secondary()),
             ];
 
             for (label, val, color) in entries {
@@ -1054,11 +1054,11 @@ impl CandleChart {
                         .gap(px(4.))
                         .child(
                             div()
-                                .text_size(px(11.))
-                                .text_color(text_disabled())
+                                .text_size(px(12.))
+                                .text_color(text_muted())
                                 .child(label.to_string()),
                         )
-                        .child(div().text_size(px(11.)).text_color(color).child(val)),
+                        .child(div().text_size(px(12.)).text_color(color).child(val)),
                 );
             }
 
@@ -1071,13 +1071,13 @@ impl CandleChart {
                             .gap(px(4.))
                             .child(
                                 div()
-                                    .text_size(px(11.))
+                                    .text_size(px(12.))
                                     .text_color(rgb(*color))
                                     .child(label.to_string()),
                             )
                             .child(
                                 div()
-                                    .text_size(px(11.))
+                                    .text_size(px(12.))
                                     .text_color(rgb(*color))
                                     .child(format!("{:.2}", v)),
                             ),

@@ -2,11 +2,16 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use gpui::prelude::*;
-use gpui::{canvas, div, px, rgb, Bounds, MouseButton, Point, Pixels, ScrollDelta, SharedString};
+use gpui::{canvas, div, px, rgb, Bounds, EventEmitter, MouseButton, Point, Pixels, ScrollDelta, SharedString};
 
 use crate::components::theme::{bg_primary, border_primary, border_accent, text_dimmest, text_dim, text_muted, text_secondary, text_disabled, color_green, color_red};
 use crate::components::toggle_button::toggle_button;
 use crate::models::{Candle, CandleInterval};
+
+/// Emitted when the user selects a different candle interval.
+pub struct IntervalChanged(pub CandleInterval);
+
+impl EventEmitter<IntervalChanged> for CandleChart {}
 
 pub struct CandleChart {
     pub candles: Vec<Candle>,
@@ -627,7 +632,7 @@ impl Render for CandleChart {
             .flex_col()
             .bg(bg_primary())
             // Zoom: scroll wheel changes visible_count
-            .on_scroll_wheel(cx.listener(move |this, event: &gpui::ScrollWheelEvent, _window, _cx| {
+            .on_scroll_wheel(cx.listener(move |this, event: &gpui::ScrollWheelEvent, _window, cx| {
                 let delta_y = match event.delta {
                     ScrollDelta::Pixels(pt) => f32::from(pt.y),
                     ScrollDelta::Lines(pt) => pt.y * 20.0,
@@ -652,16 +657,19 @@ impl Render for CandleChart {
                 }
                 this.visible_count = new_count;
                 this.clamp_scroll_offset();
+                cx.notify();
             }))
             // Drag start
-            .on_mouse_down(MouseButton::Left, cx.listener(move |this, event: &gpui::MouseDownEvent, _window, _cx| {
+            .on_mouse_down(MouseButton::Left, cx.listener(move |this, event: &gpui::MouseDownEvent, _window, cx| {
                 this.is_dragging = true;
                 this.drag_start_x = f32::from(event.position.x);
                 this.drag_start_offset = this.scroll_offset;
+                cx.notify();
             }))
             // Drag end
-            .on_mouse_up(MouseButton::Left, cx.listener(move |this, _event: &gpui::MouseUpEvent, _window, _cx| {
+            .on_mouse_up(MouseButton::Left, cx.listener(move |this, _event: &gpui::MouseUpEvent, _window, cx| {
                 this.is_dragging = false;
+                cx.notify();
             }))
             // Mouse move: drag pan + crosshair tracking
             .on_mouse_move(cx.listener(move |this, event: &gpui::MouseMoveEvent, _window, cx| {
@@ -673,11 +681,13 @@ impl Render for CandleChart {
                     let delta_x = f32::from(event.position.x) - this.drag_start_x;
                     let cw = this.candle_width();
                     let candle_step = cw + 2.0; // candle_gap = 2.0
-                    let candle_delta = (delta_x / candle_step) as isize;
-                    // Dragging right = revealing newer data = decrease offset
-                    let new_offset = this.drag_start_offset as isize - candle_delta;
-                    this.scroll_offset = new_offset.max(0) as usize;
-                    this.clamp_scroll_offset();
+                    if candle_step > 0.0 {
+                        let candle_delta = (delta_x / candle_step).round() as isize;
+                        // Dragging right = revealing newer data = decrease offset
+                        let new_offset = (this.drag_start_offset as isize - candle_delta).max(0) as usize;
+                        this.scroll_offset = new_offset;
+                        this.clamp_scroll_offset();
+                    }
                 }
                 cx.notify();
             }))
@@ -713,8 +723,11 @@ impl Render for CandleChart {
                             let label = interval.label();
                             let is_active = interval == self.interval;
                             toggle_button(SharedString::from(format!("interval-{}", label)), label, is_active)
-                                .on_click(cx.listener(move |this, _, _, _| {
-                                    this.interval = interval;
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    if this.interval != interval {
+                                        this.interval = interval;
+                                        cx.emit(IntervalChanged(interval));
+                                    }
                                 }))
                         }),
                     )

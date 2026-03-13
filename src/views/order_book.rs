@@ -85,7 +85,7 @@ impl Render for OrderBookView {
                             .child("TOTAL"),
                     ),
             )
-            // Asks (reversed - highest price at top)
+            // Asks (reversed - highest price at top, lowest near spread)
             .child(
                 div()
                     .flex_1()
@@ -93,8 +93,9 @@ impl Render for OrderBookView {
                     .overflow_y_scroll()
                     .flex()
                     .flex_col()
+                    .justify_end()
                     .children(
-                        self.data.asks.iter().enumerate().map(|(i, level)| {
+                        self.data.asks.iter().enumerate().rev().map(|(i, level)| {
                             let bar_pct = (level.cumulative / max_cum * 100.0).min(100.0);
                             render_level(i, level.price, level.size, level.cumulative, color_sell(), color_sell_bg(), bar_pct, "ask")
                         }),

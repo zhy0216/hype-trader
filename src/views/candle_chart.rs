@@ -796,12 +796,17 @@ impl Render for CandleChart {
             )
             // OHLCV info bar showing last candle data + MA values
             .child(self.render_ohlcv_bar(&visible, &ma_last_values))
-            // Main chart area: candlesticks + MA overlay + BB overlay + crosshair
-            .child({
+            // Main chart area + price axis in horizontal layout
+            .child(
+                div()
+                    .flex()
+                    .w_full()
+                    .child({
                 let origin_cell = self.chart_area_origin.clone();
                 div()
                     .h(px(chart_height))
-                    .w_full()
+                    .flex_grow()
+                    .min_w_0()
                     .relative()
                     .overflow_hidden()
                     // Invisible canvas to track chart area bounds in window coordinates
@@ -957,8 +962,9 @@ impl Render for CandleChart {
                         }
                     })
             })
-            // Price axis labels
-            .child(self.render_price_axis(price_min, price_max))
+                    // Price axis on right side
+                    .child(self.render_price_axis(price_min, price_max, chart_height))
+            )
             // Time axis labels
             .child(self.render_time_axis(&visible, candle_width, candle_gap, chart_px_padding))
             // Volume bars
@@ -1102,13 +1108,17 @@ impl CandleChart {
         container
     }
 
-    fn render_price_axis(&self, price_min: f64, price_max: f64) -> impl IntoElement {
+    fn render_price_axis(&self, price_min: f64, price_max: f64, height: f32) -> impl IntoElement {
         div()
             .flex()
+            .flex_col()
             .justify_between()
-            .px(px(8.))
-            .py(px(2.))
-            .children((0..5).map(|i| {
+            .h(px(height))
+            .pl(px(4.))
+            .pr(px(4.))
+            .w(px(60.))
+            .flex_shrink_0()
+            .children((0..5).rev().map(|i| {
                 let price = price_min + (i as f64 / 4.0) * (price_max - price_min);
                 div()
                     .text_size(px(10.))

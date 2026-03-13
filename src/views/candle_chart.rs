@@ -1415,12 +1415,25 @@ impl CandleChart {
     }
 }
 
-/// Format a candle timestamp (unix ms) as a human-readable time label.
+/// Get the local timezone offset in seconds from UTC using libc.
+fn local_utc_offset_secs(unix_secs: i64) -> i64 {
+    unsafe {
+        let mut tm: libc::tm = std::mem::zeroed();
+        let time = unix_secs as libc::time_t;
+        libc::localtime_r(&time, &mut tm);
+        tm.tm_gmtoff as i64
+    }
+}
+
+/// Format a candle timestamp (unix ms) as a human-readable time label
+/// using the user's local timezone.
 fn format_candle_time(time_ms: u64, interval: CandleInterval) -> String {
-    let secs = (time_ms / 1000) as i64;
-    // Manual UTC breakdown (no chrono dependency)
-    let days_since_epoch = secs / 86400;
-    let time_of_day = secs % 86400;
+    let utc_secs = (time_ms / 1000) as i64;
+    let offset = local_utc_offset_secs(utc_secs);
+    let local_secs = utc_secs + offset;
+
+    let days_since_epoch = local_secs.div_euclid(86400);
+    let time_of_day = local_secs.rem_euclid(86400);
     let hours = time_of_day / 3600;
     let minutes = (time_of_day % 3600) / 60;
 

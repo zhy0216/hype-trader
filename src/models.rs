@@ -39,6 +39,7 @@ pub struct Symbol {
     pub quote: String,
     pub last_price: f64,
     pub change_24h: f64, // percentage
+    pub prev_day_price: f64, // previous day price for recalculating change_24h
     pub volume_24h: f64,
 }
 

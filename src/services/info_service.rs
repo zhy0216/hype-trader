@@ -76,6 +76,7 @@ impl InfoService {
                 quote: "USD".to_string(),
                 last_price: mark_px,
                 change_24h,
+                prev_day_price: prev_day_px,
                 volume_24h: volume,
             })
         }).collect();
@@ -98,6 +99,7 @@ impl InfoService {
                 quote: "USD".to_string(),
                 last_price: mid_price,
                 change_24h: 0.0,
+                prev_day_price: 0.0,
                 volume_24h: 0.0,
             }
         }).collect();

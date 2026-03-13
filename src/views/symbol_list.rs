@@ -9,7 +9,7 @@ use crate::components::theme::*;
 use crate::models::Symbol;
 
 const FLASH_DURATION_MS: u128 = 800;
-const PINNED_BASES: &[&str] = &["BTC", "ETH", "SOL", "SUI", "HYPER"];
+const PINNED_BASES: &[&str] = &["BTC", "ETH", "SOL", "SUI", "HYPE"];
 
 /// Emitted when the user clicks a symbol in the list.
 /// Carries the full symbol name (e.g. "ETH-USD").
@@ -56,6 +56,11 @@ impl SymbolList {
                 }
                 self.prev_prices.insert(symbol.name.clone(), new_price);
                 symbol.last_price = new_price;
+                // Recalculate 24h change based on prev_day_price
+                if symbol.prev_day_price > 0.0 {
+                    symbol.change_24h =
+                        ((new_price - symbol.prev_day_price) / symbol.prev_day_price) * 100.0;
+                }
             }
         }
     }
@@ -98,6 +103,9 @@ impl Render for SymbolList {
         _window: &mut gpui::Window,
         cx: &mut gpui::Context<Self>,
     ) -> impl IntoElement {
+        // Sync filter text from input state
+        self.filter = self.filter_input.read(cx).value().to_string();
+
         let selected = self.selected.clone();
 
         // Collect filtered symbols into owned data to release borrow on self

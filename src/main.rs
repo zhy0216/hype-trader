@@ -67,6 +67,12 @@ impl Render for HypeTrader {
 }
 
 fn main() {
+    // Initialize tracing so logs are printed to stderr with timestamps
+    tracing_subscriber::fmt()
+        .with_target(false)
+        .with_timer(tracing_subscriber::fmt::time::uptime())
+        .init();
+
     let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
     let _guard = rt.enter();
 

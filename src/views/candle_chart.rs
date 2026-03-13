@@ -21,6 +21,8 @@ pub struct CandleChart {
     pub drag_start_x: f32,
     pub drag_start_offset: usize,
     pub hover_position: Option<Point<Pixels>>,
+    /// True while fetching data for a new symbol
+    pub loading: bool,
 }
 
 impl CandleChart {
@@ -40,6 +42,7 @@ impl CandleChart {
             drag_start_x: 0.0,
             drag_start_offset: 0,
             hover_position: None,
+            loading: false,
         }
     }
 
@@ -614,6 +617,7 @@ impl Render for CandleChart {
             .id("candle-chart-container")
             .w_full()
             .h_full()
+            .relative()
             .flex()
             .flex_col()
             .bg(bg_primary())
@@ -959,6 +963,26 @@ impl Render for CandleChart {
                     chart_px_padding,
                     dot_size,
                 ))
+            })
+            // Loading overlay
+            .when(self.loading, |el| {
+                el.child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .size_full()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .bg(gpui::rgba(0x0a0c14cc))
+                        .child(
+                            div()
+                                .text_size(px(13.))
+                                .text_color(text_dim())
+                                .child("Loading..."),
+                        ),
+                )
             })
     }
 }

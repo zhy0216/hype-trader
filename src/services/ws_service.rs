@@ -10,9 +10,11 @@ use crate::models::*;
 /// Messages pushed from WebSocket to the UI layer
 #[derive(Debug)]
 pub enum WsUpdate {
-    OrderBookUpdate(OrderBook),
+    /// (coin, book) – coin identifies which symbol this update is for
+    OrderBookUpdate(String, OrderBook),
     TradesUpdate(Vec<Trade>),
-    CandleUpdate(Candle),
+    /// (coin, candle) – coin identifies which symbol this update is for
+    CandleUpdate(String, Candle),
     AllMids(std::collections::HashMap<String, f64>),
     OrderUpdate(String),
     UserFill(TradeHistory),
@@ -40,6 +42,12 @@ impl WsService {
         Ok(())
     }
 
+    /// Unsubscribe a single subscription by ID.
+    pub async fn unsubscribe(&mut self, sub_id: u32) {
+        let _ = self.client.unsubscribe(sub_id).await;
+        self.active_subs.retain(|&id| id != sub_id);
+    }
+
     pub async fn subscribe_l2_book(
         &mut self, coin: &str, tx: mpsc::UnboundedSender<WsUpdate>,
     ) -> Result<u32> {
@@ -50,6 +58,7 @@ impl WsService {
         ).await?;
         self.active_subs.push(sub_id);
 
+        let coin_name = coin.to_string();
         tokio::spawn(async move {
             while let Some(msg) = ws_rx.recv().await {
                 if let HlMessage::L2Book(l2) = msg {
@@ -75,7 +84,7 @@ impl WsService {
                         }
                     }
                     let last_price = bids.first().map(|b| b.price).unwrap_or(0.0);
-                    let _ = tx.send(WsUpdate::OrderBookUpdate(OrderBook { bids, asks, last_price }));
+                    let _ = tx.send(WsUpdate::OrderBookUpdate(coin_name.clone(), OrderBook { bids, asks, last_price }));
                 }
             }
         });
@@ -123,6 +132,7 @@ impl WsService {
         ).await?;
         self.active_subs.push(sub_id);
 
+        let coin_name = coin.to_string();
         tokio::spawn(async move {
             while let Some(msg) = ws_rx.recv().await {
                 if let HlMessage::Candle(candle) = msg {
@@ -135,7 +145,7 @@ impl WsService {
                         close: c.close.parse::<f64>().unwrap_or(0.0),
                         volume: c.volume.parse::<f64>().unwrap_or(0.0),
                     };
-                    let _ = tx.send(WsUpdate::CandleUpdate(converted));
+                    let _ = tx.send(WsUpdate::CandleUpdate(coin_name.clone(), converted));
                 }
             }
         });

@@ -6,12 +6,15 @@ use crate::models::OrderBook as OrderBookData;
 
 pub struct OrderBookView {
     pub data: OrderBookData,
+    /// True while fetching data for a new symbol
+    pub loading: bool,
 }
 
 impl OrderBookView {
     pub fn new() -> Self {
         Self {
             data: OrderBookData::default(),
+            loading: false,
         }
     }
 
@@ -34,6 +37,7 @@ impl Render for OrderBookView {
         div()
             .w(px(280.))
             .h_full()
+            .relative()
             .flex()
             .flex_col()
             .bg(bg_panel())
@@ -131,6 +135,26 @@ impl Render for OrderBookView {
                         }),
                     ),
             )
+            // Loading overlay
+            .when(self.loading, |el| {
+                el.child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .size_full()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .bg(gpui::rgba(0x0a0c14cc))
+                        .child(
+                            div()
+                                .text_size(px(13.))
+                                .text_color(text_dim())
+                                .child("Loading..."),
+                        ),
+                )
+            })
     }
 }
 

@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::Duration;
 
 use gpui::prelude::*;
@@ -28,6 +29,10 @@ pub struct MainView {
     pub private_key: Option<String>,
     pub network: Network,
     _symbol_subscription: Subscription,
+    /// Channel to tell the WS task to switch symbol subscriptions
+    symbol_switch_tx: tokio::sync::mpsc::UnboundedSender<String>,
+    /// Shared InfoService for REST fetches (reused across symbol switches)
+    info_service: Arc<tokio::sync::OnceCell<InfoService>>,
 }
 
 impl MainView {
@@ -88,9 +93,17 @@ impl MainView {
         let toast_clone = toast.clone();
         let pk_clone = private_key.clone();
 
+        // Channel for symbol switch commands from on_symbol_selected → WS task
+        let (symbol_switch_tx, mut symbol_switch_rx) =
+            tokio::sync::mpsc::unbounded_channel::<String>();
+
+        // Shared InfoService: created once, reused for all REST fetches
+        let info_service: Arc<tokio::sync::OnceCell<InfoService>> = Arc::new(tokio::sync::OnceCell::new());
+        let info_cell_clone = info_service.clone();
+
         // Spawn async task to fetch real data, then start WebSocket subscriptions
         cx.spawn(async move |this, cx| {
-            // Create InfoService
+            // Create InfoService once and store in the shared cell
             let info = match InfoService::new(network).await {
                 Ok(info) => info,
                 Err(e) => {
@@ -98,6 +111,8 @@ impl MainView {
                     return;
                 }
             };
+            let _ = info_cell_clone.set(info);
+            let info = info_cell_clone.get().unwrap();
 
             // Fetch symbols
             match info.fetch_symbols().await {
@@ -159,14 +174,21 @@ impl MainView {
 
                 let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<WsUpdate>();
 
+                // Track current coin for filtering stale WS updates
+                let mut current_coin = "ETH".to_string();
+
                 // Subscribe to L2 book for the default symbol
-                if let Err(e) = ws.subscribe_l2_book("ETH", tx.clone()).await {
-                    tracing::error!("Failed to subscribe to L2 book: {}", e);
+                let mut l2_sub_id = None;
+                match ws.subscribe_l2_book(&current_coin, tx.clone()).await {
+                    Ok(id) => l2_sub_id = Some(id),
+                    Err(e) => tracing::error!("Failed to subscribe to L2 book: {}", e),
                 }
 
                 // Subscribe to candles for default symbol + interval
-                if let Err(e) = ws.subscribe_candles("ETH", CandleInterval::H1, tx.clone()).await {
-                    tracing::error!("Failed to subscribe to candles: {}", e);
+                let mut candle_sub_id = None;
+                match ws.subscribe_candles(&current_coin, CandleInterval::H1, tx.clone()).await {
+                    Ok(id) => candle_sub_id = Some(id),
+                    Err(e) => tracing::error!("Failed to subscribe to candles: {}", e),
                 }
 
                 // Subscribe to all mids for live price updates on symbol list
@@ -209,49 +231,83 @@ impl MainView {
                 tracing::info!("WebSocket subscriptions active, entering recv loop");
 
                 // Receive loop: route WsUpdate messages to UI entities.
+                // Also listen for symbol switch commands to resubscribe.
                 // Keep `ws` alive in scope so subscriptions stay open.
-                while let Some(update) = rx.recv().await {
-                    match update {
-                        WsUpdate::OrderBookUpdate(book) => {
-                            let _ = cx.update_entity(&order_book_clone, |view, _cx| {
-                                view.data = book;
-                            });
-                        }
-                        WsUpdate::CandleUpdate(candle) => {
-                            let _ = cx.update_entity(&candle_chart_clone, |chart, _cx| {
-                                if let Some(last) = chart.candles.last() {
-                                    if last.time == candle.time {
-                                        // Same candle period: replace the last candle
-                                        let len = chart.candles.len();
-                                        chart.candles[len - 1] = candle;
-                                    } else {
-                                        chart.candles.push(candle);
-                                    }
-                                } else {
-                                    chart.candles.push(candle);
-                                }
-                            });
-                        }
-                        WsUpdate::AllMids(mids) => {
-                            let _ = cx.update_entity(&symbol_list_clone, |list, _cx| {
-                                for symbol in &mut list.symbols {
-                                    // Symbol base is the coin name (e.g. "ETH")
-                                    if let Some(&price) = mids.get(&symbol.base) {
-                                        symbol.last_price = price;
+                loop {
+                    tokio::select! {
+                        update = rx.recv() => {
+                            let Some(update) = update else { break };
+                            match update {
+                                WsUpdate::OrderBookUpdate(coin, book) => {
+                                    if coin == current_coin {
+                                        let _ = cx.update_entity(&order_book_clone, |view, _cx| {
+                                            view.data = book;
+                                        });
                                     }
                                 }
-                            });
+                                WsUpdate::CandleUpdate(coin, candle) => {
+                                    if coin == current_coin {
+                                        let _ = cx.update_entity(&candle_chart_clone, |chart, _cx| {
+                                            if let Some(last) = chart.candles.last() {
+                                                if last.time == candle.time {
+                                                    // Same candle period: replace the last candle
+                                                    let len = chart.candles.len();
+                                                    chart.candles[len - 1] = candle;
+                                                } else {
+                                                    chart.candles.push(candle);
+                                                }
+                                            } else {
+                                                chart.candles.push(candle);
+                                            }
+                                        });
+                                    }
+                                }
+                                WsUpdate::AllMids(mids) => {
+                                    let _ = cx.update_entity(&symbol_list_clone, |list, _cx| {
+                                        list.update_prices(&mids);
+                                    });
+                                }
+                                WsUpdate::OrderUpdate(info) => {
+                                    tracing::info!("Order update: {}", info);
+                                }
+                                WsUpdate::UserFill(fill) => {
+                                    let _ = cx.update_entity(&bottom_panel_clone, |panel, _cx| {
+                                        panel.trade_history.insert(0, fill);
+                                    });
+                                }
+                                WsUpdate::TradesUpdate(_) => {}
+                            }
                         }
-                        WsUpdate::OrderUpdate(info) => {
-                            tracing::info!("Order update: {}", info);
-                        }
-                        WsUpdate::UserFill(fill) => {
-                            let _ = cx.update_entity(&bottom_panel_clone, |panel, _cx| {
-                                panel.trade_history.insert(0, fill);
-                            });
-                        }
-                        WsUpdate::TradesUpdate(_) => {
-                            // Not routed to UI currently
+                        new_coin = symbol_switch_rx.recv() => {
+                            let Some(new_coin) = new_coin else { break };
+                            if new_coin == current_coin {
+                                continue;
+                            }
+                            let wst0 = std::time::Instant::now();
+                            tracing::info!("[ws-switch] {} -> {}: start", current_coin, new_coin);
+
+                            // Unsubscribe old L2 book and candle subs
+                            if let Some(id) = l2_sub_id.take() {
+                                ws.unsubscribe(id).await;
+                            }
+                            if let Some(id) = candle_sub_id.take() {
+                                ws.unsubscribe(id).await;
+                            }
+                            tracing::info!("[ws-switch] unsubscribed old: {:?}", wst0.elapsed());
+
+                            current_coin = new_coin;
+
+                            // Subscribe to new symbol
+                            match ws.subscribe_l2_book(&current_coin, tx.clone()).await {
+                                Ok(id) => l2_sub_id = Some(id),
+                                Err(e) => tracing::error!("[ws-switch] subscribe L2 book FAILED for {}: {}", current_coin, e),
+                            }
+                            tracing::info!("[ws-switch] l2_book subscribed: {:?}", wst0.elapsed());
+                            match ws.subscribe_candles(&current_coin, CandleInterval::H1, tx.clone()).await {
+                                Ok(id) => candle_sub_id = Some(id),
+                                Err(e) => tracing::error!("[ws-switch] subscribe candles FAILED for {}: {}", current_coin, e),
+                            }
+                            tracing::info!("[ws-switch] candles subscribed: {:?} TOTAL", wst0.elapsed());
                         }
                     }
                 }
@@ -284,6 +340,8 @@ impl MainView {
             private_key,
             network,
             _symbol_subscription,
+            symbol_switch_tx,
+            info_service,
         }
     }
 
@@ -305,6 +363,9 @@ impl MainView {
 
         tracing::info!("Symbol selected: {} (coin: {})", symbol_name, coin);
 
+        // Tell the WS task to switch L2 book + candle subscriptions
+        let _ = self.symbol_switch_tx.send(coin.clone());
+
         // Update order panel symbol
         let order_panel = self.order_panel.clone();
         cx.update_entity(&order_panel, |panel, _cx| {
@@ -314,41 +375,62 @@ impl MainView {
         // Clone entity handles for async task
         let order_book_clone = self.order_book.clone();
         let candle_chart_clone = self.candle_chart.clone();
-        let network = self.network;
+        let info_cell = self.info_service.clone();
 
-        // Spawn async task to re-fetch orderbook and candles for the new symbol
+        // Show loading state immediately
+        cx.update_entity(&self.candle_chart, |chart, cx| { chart.loading = true; cx.notify(); });
+        cx.update_entity(&self.order_book, |view, cx| { view.loading = true; cx.notify(); });
+
+        // Spawn async task to re-fetch orderbook and candles in parallel
         cx.spawn_in(window, async move |_this, cx| {
-            let info = match InfoService::new(network).await {
-                Ok(info) => info,
-                Err(e) => {
-                    tracing::error!("Failed to create InfoService for symbol switch: {}", e);
-                    return;
-                }
+            let t0 = std::time::Instant::now();
+
+            let Some(info) = info_cell.get() else {
+                tracing::error!("InfoService not yet initialized");
+                return;
             };
+            tracing::info!("[switch {}] info_service ready: {:?}", coin, t0.elapsed());
 
-            // Fetch orderbook
-            match info.fetch_orderbook(&coin).await {
-                Ok(book) => {
-                    let _ = cx.update(|_window, cx| {
-                        order_book_clone.update(cx, |view, _cx| {
-                            view.data = book;
-                        });
+            // Fetch orderbook and candles in parallel
+            let (book_result, candles_result) = tokio::join!(
+                info.fetch_orderbook(&coin),
+                info.fetch_candles(&coin, CandleInterval::H1, 100),
+            );
+            tracing::info!("[switch {}] REST fetches done: {:?}", coin, t0.elapsed());
+
+            if let Ok(book) = book_result {
+                let _ = cx.update(|_window, cx| {
+                    order_book_clone.update(cx, |view, cx| {
+                        view.data = book;
+                        view.loading = false;
+                        cx.notify();
                     });
-                }
-                Err(e) => tracing::error!("Failed to fetch orderbook for {}: {}", coin, e),
+                });
+                tracing::info!("[switch {}] orderbook UI updated: {:?}", coin, t0.elapsed());
+            } else if let Err(e) = book_result {
+                let _ = cx.update(|_window, cx| {
+                    order_book_clone.update(cx, |view, cx| { view.loading = false; cx.notify(); });
+                });
+                tracing::error!("[switch {}] fetch orderbook FAILED: {} ({:?})", coin, e, t0.elapsed());
             }
 
-            // Fetch candles
-            match info.fetch_candles(&coin, CandleInterval::H1, 100).await {
-                Ok(candles) => {
-                    let _ = cx.update(|_window, cx| {
-                        candle_chart_clone.update(cx, |chart, _cx| {
-                            chart.candles = candles;
-                        });
+            if let Ok(candles) = candles_result {
+                let _ = cx.update(|_window, cx| {
+                    candle_chart_clone.update(cx, |chart, cx| {
+                        chart.candles = candles;
+                        chart.loading = false;
+                        cx.notify();
                     });
-                }
-                Err(e) => tracing::error!("Failed to fetch candles for {}: {}", coin, e),
+                });
+                tracing::info!("[switch {}] candles UI updated: {:?}", coin, t0.elapsed());
+            } else if let Err(e) = candles_result {
+                let _ = cx.update(|_window, cx| {
+                    candle_chart_clone.update(cx, |chart, cx| { chart.loading = false; cx.notify(); });
+                });
+                tracing::error!("[switch {}] fetch candles FAILED: {} ({:?})", coin, e, t0.elapsed());
             }
+
+            tracing::info!("[switch {}] TOTAL: {:?}", coin, t0.elapsed());
         })
         .detach();
     }

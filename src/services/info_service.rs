@@ -1,10 +1,21 @@
 use anyhow::Result;
 use ethers::types::H160;
 use hyperliquid_rust_sdk::{BaseUrl, InfoClient};
+use serde::Deserialize;
 use crate::models::*;
+
+/// Asset context returned by the Hyperliquid `metaAndAssetCtxs` endpoint.
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+struct PerpsAssetCtx {
+    day_ntl_vlm: String,
+    mark_px: String,
+    prev_day_px: String,
+}
 
 pub struct InfoService {
     client: InfoClient,
+    base_url: String,
 }
 
 impl InfoService {
@@ -13,12 +24,67 @@ impl InfoService {
             Network::Mainnet => BaseUrl::Mainnet,
             Network::Testnet => BaseUrl::Testnet,
         };
+        let url_str = match network {
+            Network::Mainnet => "https://api.hyperliquid.xyz/info",
+            Network::Testnet => "https://api.hyperliquid-testnet.xyz/info",
+        };
         let client = InfoClient::new(None, Some(base_url)).await?;
-        Ok(Self { client })
+        Ok(Self { client, base_url: url_str.to_string() })
     }
 
-    /// Fetch all perpetual trading symbols with mid prices
+    /// Fetch all perpetual trading symbols with 24h change and volume
     pub async fn fetch_symbols(&self) -> Result<Vec<Symbol>> {
+        // Call metaAndAssetCtxs to get prev_day_px, mark_px, and day_ntl_vlm
+        let http = reqwest::Client::new();
+        let resp: serde_json::Value = http
+            .post(&self.base_url)
+            .json(&serde_json::json!({"type": "metaAndAssetCtxs"}))
+            .send()
+            .await?
+            .json()
+            .await?;
+
+        // Response is [meta, [assetCtx, ...]]
+        let universe = resp.get(0)
+            .and_then(|m| m.get("universe"))
+            .and_then(|u| u.as_array());
+        let ctxs = resp.get(1)
+            .and_then(|c| c.as_array());
+
+        let (universe, ctxs) = match (universe, ctxs) {
+            (Some(u), Some(c)) => (u, c),
+            _ => return self.fetch_symbols_fallback().await,
+        };
+
+        let symbols = universe.iter().zip(ctxs.iter()).filter_map(|(asset, ctx)| {
+            let name = asset.get("name")?.as_str()?;
+            let ctx: PerpsAssetCtx = serde_json::from_value(ctx.clone()).ok()?;
+
+            let mark_px = ctx.mark_px.parse::<f64>().unwrap_or(0.0);
+            let prev_day_px = ctx.prev_day_px.parse::<f64>().unwrap_or(0.0);
+            let volume = ctx.day_ntl_vlm.parse::<f64>().unwrap_or(0.0);
+
+            let change_24h = if prev_day_px > 0.0 {
+                ((mark_px - prev_day_px) / prev_day_px) * 100.0
+            } else {
+                0.0
+            };
+
+            Some(Symbol {
+                name: format!("{}-USD", name),
+                base: name.to_string(),
+                quote: "USD".to_string(),
+                last_price: mark_px,
+                change_24h,
+                volume_24h: volume,
+            })
+        }).collect();
+
+        Ok(symbols)
+    }
+
+    /// Fallback using basic meta + all_mids if metaAndAssetCtxs fails
+    async fn fetch_symbols_fallback(&self) -> Result<Vec<Symbol>> {
         let meta = self.client.meta().await?;
         let mids = self.client.all_mids().await?;
 

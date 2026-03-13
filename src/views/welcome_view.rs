@@ -1,8 +1,10 @@
 use gpui::prelude::*;
 use gpui::{div, Entity, EventEmitter};
 use gpui_component::button::{Button, ButtonVariants as _};
-use gpui_component::input::{Input, InputState};
+use gpui_component::input::InputState;
 
+use crate::components::theme::*;
+use crate::components::input_field::input_field;
 use crate::models::{AppConfig, Network, WalletConfig};
 use crate::services::{config_service, wallet_service};
 
@@ -176,7 +178,7 @@ impl WelcomeView {
             .child(
                 div()
                     .text_size(gpui::px(13.))
-                    .text_color(gpui::rgb(0xdddddd))
+                    .text_color(text_secondary())
                     .child("Network"),
             )
             .child(
@@ -229,24 +231,12 @@ impl WelcomeView {
                     .child(
                         div()
                             .text_size(gpui::px(13.))
-                            .text_color(gpui::rgb(0x53c28b))
+                            .text_color(color_success())
                             .child("Saved wallet found"),
                     ),
             )
             // Password input
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(gpui::px(6.))
-                    .child(
-                        div()
-                            .text_size(gpui::px(13.))
-                            .text_color(gpui::rgb(0xdddddd))
-                            .child("Password"),
-                    )
-                    .child(Input::new(&self.password_input)),
-            )
+            .child(input_field("Password", &self.password_input))
             // Unlock button
             .child(
                 Button::new("unlock")
@@ -289,19 +279,7 @@ impl WelcomeView {
             .flex_col()
             .gap(gpui::px(16.))
             // Private key input
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(gpui::px(6.))
-                    .child(
-                        div()
-                            .text_size(gpui::px(13.))
-                            .text_color(gpui::rgb(0xdddddd))
-                            .child("Private Key"),
-                    )
-                    .child(Input::new(&self.key_input)),
-            )
+            .child(input_field("Private Key", &self.key_input))
             // Remember wallet toggle
             .child(
                 div()
@@ -326,19 +304,7 @@ impl WelcomeView {
             )
             // Password field (visible when remember is checked)
             .when(self.remember, |el| {
-                el.child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap(gpui::px(6.))
-                        .child(
-                            div()
-                                .text_size(gpui::px(13.))
-                                .text_color(gpui::rgb(0xdddddd))
-                                .child("Encryption Password"),
-                        )
-                        .child(Input::new(&self.password_input)),
-                )
+                el.child(input_field("Encryption Password", &self.password_input))
             })
             // Connect button
             .child(
@@ -360,15 +326,15 @@ impl Render for WelcomeView {
             .flex()
             .items_center()
             .justify_center()
-            .bg(gpui::rgb(0x1a1a2e))
+            .bg(bg_primary())
             .child(
                 div()
                     .w(gpui::px(420.))
                     .p(gpui::px(32.))
                     .rounded(gpui::px(12.))
-                    .bg(gpui::rgb(0x1c2a4a))
+                    .bg(bg_card())
                     .border_1()
-                    .border_color(gpui::rgb(0x1a4a80))
+                    .border_color(border_card())
                     .flex()
                     .flex_col()
                     .gap(gpui::px(20.))
@@ -380,7 +346,7 @@ impl Render for WelcomeView {
                             .child(
                                 div()
                                     .text_size(gpui::px(24.))
-                                    .text_color(gpui::rgb(0xe94560))
+                                    .text_color(color_brand())
                                     .child("Hype Trader"),
                             ),
                     )
@@ -392,7 +358,7 @@ impl Render for WelcomeView {
                             .child(
                                 div()
                                     .text_size(gpui::px(13.))
-                                    .text_color(gpui::rgb(0xc8c8c8))
+                                    .text_color(text_muted())
                                     .child("Hyperliquid Trading Client"),
                             ),
                     )
@@ -410,7 +376,7 @@ impl Render for WelcomeView {
                         el.child(
                             div()
                                 .text_size(gpui::px(12.))
-                                .text_color(gpui::rgb(0xff4444))
+                                .text_color(color_red())
                                 .child(msg),
                         )
                     })
@@ -422,7 +388,7 @@ impl Render for WelcomeView {
                             .child(
                                 div()
                                     .text_size(gpui::px(12.))
-                                    .text_color(gpui::rgb(0xaaaaaa))
+                                    .text_color(text_dim())
                                     .child("or"),
                             ),
                     )

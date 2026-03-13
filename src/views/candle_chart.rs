@@ -1,7 +1,8 @@
 use gpui::prelude::*;
 use gpui::{div, px, rgb, MouseButton, Point, Pixels, ScrollDelta, SharedString};
-use gpui_component::button::{Button, ButtonVariants as _};
 
+use crate::components::theme::{bg_primary, border_primary, text_dimmest, text_dim, text_disabled, color_green, color_red};
+use crate::components::toggle_button::toggle_button;
 use crate::models::{Candle, CandleInterval};
 
 pub struct CandleChart {
@@ -328,9 +329,9 @@ fn render_candle(
 ) -> impl IntoElement {
     let is_bullish = candle.close >= candle.open;
     let color = if is_bullish {
-        rgb(0x00ff88)
+        color_green()
     } else {
-        rgb(0xff4444)
+        color_red()
     };
 
     let body_top = if is_bullish { candle.close } else { candle.open };
@@ -545,7 +546,7 @@ impl Render for CandleChart {
                             .w(px(dot_size))
                             .h(px(dot_size))
                             .rounded(px(dot_size / 2.0))
-                            .bg(rgb(0x888888)),
+                            .bg(text_dimmest()),
                     );
                 }
 
@@ -615,7 +616,7 @@ impl Render for CandleChart {
             .h_full()
             .flex()
             .flex_col()
-            .bg(rgb(0x1a1a2e))
+            .bg(bg_primary())
             // Zoom: scroll wheel changes visible_count
             .on_scroll_wheel(cx.listener(move |this, event: &gpui::ScrollWheelEvent, _window, _cx| {
                 let delta_y = match event.delta {
@@ -686,7 +687,7 @@ impl Render for CandleChart {
                     .px(px(8.))
                     .py(px(6.))
                     .border_b_1()
-                    .border_color(rgb(0x0f3460))
+                    .border_color(border_primary())
                     .children(
                         [
                             CandleInterval::M1,
@@ -700,16 +701,7 @@ impl Render for CandleChart {
                         .map(|interval| {
                             let label = interval.label();
                             let is_active = interval == self.interval;
-                            Button::new(SharedString::from(format!("interval-{}", label)))
-                                .label(label)
-                                .compact()
-                                .map(|b| {
-                                    if is_active {
-                                        b.primary()
-                                    } else {
-                                        b.ghost()
-                                    }
-                                })
+                            toggle_button(SharedString::from(format!("interval-{}", label)), label, is_active)
                                 .on_click(cx.listener(move |this, _, _, _| {
                                     this.interval = interval;
                                 }))
@@ -721,35 +713,26 @@ impl Render for CandleChart {
                             .w(px(1.))
                             .h(px(16.))
                             .mx(px(4.))
-                            .bg(rgb(0x0f3460)),
+                            .bg(border_primary()),
                     )
                     // MA toggle buttons
                     .child({
                         let active = self.show_ma7;
-                        Button::new("toggle-ma7")
-                            .label("MA7")
-                            .compact()
-                            .map(|b| if active { b.primary() } else { b.ghost() })
+                        toggle_button("toggle-ma7", "MA7", active)
                             .on_click(cx.listener(|this, _, _, _| {
                                 this.show_ma7 = !this.show_ma7;
                             }))
                     })
                     .child({
                         let active = self.show_ma25;
-                        Button::new("toggle-ma25")
-                            .label("MA25")
-                            .compact()
-                            .map(|b| if active { b.primary() } else { b.ghost() })
+                        toggle_button("toggle-ma25", "MA25", active)
                             .on_click(cx.listener(|this, _, _, _| {
                                 this.show_ma25 = !this.show_ma25;
                             }))
                     })
                     .child({
                         let active = self.show_ma99;
-                        Button::new("toggle-ma99")
-                            .label("MA99")
-                            .compact()
-                            .map(|b| if active { b.primary() } else { b.ghost() })
+                        toggle_button("toggle-ma99", "MA99", active)
                             .on_click(cx.listener(|this, _, _, _| {
                                 this.show_ma99 = !this.show_ma99;
                             }))
@@ -760,15 +743,12 @@ impl Render for CandleChart {
                             .w(px(1.))
                             .h(px(16.))
                             .mx(px(4.))
-                            .bg(rgb(0x0f3460)),
+                            .bg(border_primary()),
                     )
                     // BB toggle
                     .child({
                         let active = self.show_bb;
-                        Button::new("toggle-bb")
-                            .label("BB")
-                            .compact()
-                            .map(|b| if active { b.primary() } else { b.ghost() })
+                        toggle_button("toggle-bb", "BB", active)
                             .on_click(cx.listener(|this, _, _, _| {
                                 this.show_bb = !this.show_bb;
                             }))
@@ -776,10 +756,7 @@ impl Render for CandleChart {
                     // MACD toggle
                     .child({
                         let active = self.show_macd;
-                        Button::new("toggle-macd")
-                            .label("MACD")
-                            .compact()
-                            .map(|b| if active { b.primary() } else { b.ghost() })
+                        toggle_button("toggle-macd", "MACD", active)
                             .on_click(cx.listener(|this, _, _, _| {
                                 this.show_macd = !this.show_macd;
                             }))
@@ -787,10 +764,7 @@ impl Render for CandleChart {
                     // RSI toggle
                     .child({
                         let active = self.show_rsi;
-                        Button::new("toggle-rsi")
-                            .label("RSI")
-                            .compact()
-                            .map(|b| if active { b.primary() } else { b.ghost() })
+                        toggle_button("toggle-rsi", "RSI", active)
                             .on_click(cx.listener(|this, _, _, _| {
                                 this.show_rsi = !this.show_rsi;
                             }))
@@ -910,22 +884,22 @@ impl Render for CandleChart {
                                         .text_size(px(10.0))
                                         .child(
                                             div().flex().gap(px(4.0))
-                                                .child(div().text_color(rgb(0x888888)).child("O"))
+                                                .child(div().text_color(text_dimmest()).child("O"))
                                                 .child(div().text_color(rgb(color)).child(format!("{:.2}", c.open)))
-                                                .child(div().text_color(rgb(0x888888)).child("H"))
+                                                .child(div().text_color(text_dimmest()).child("H"))
                                                 .child(div().text_color(rgb(color)).child(format!("{:.2}", c.high)))
                                         )
                                         .child(
                                             div().flex().gap(px(4.0))
-                                                .child(div().text_color(rgb(0x888888)).child("L"))
+                                                .child(div().text_color(text_dimmest()).child("L"))
                                                 .child(div().text_color(rgb(color)).child(format!("{:.2}", c.low)))
-                                                .child(div().text_color(rgb(0x888888)).child("C"))
+                                                .child(div().text_color(text_dimmest()).child("C"))
                                                 .child(div().text_color(rgb(color)).child(format!("{:.2}", c.close)))
                                         )
                                         .child(
                                             div().flex().gap(px(4.0))
-                                                .child(div().text_color(rgb(0x888888)).child("Vol"))
-                                                .child(div().text_color(rgb(0xaaaaaa)).child(format!("{:.0}", c.volume)))
+                                                .child(div().text_color(text_dimmest()).child("Vol"))
+                                                .child(div().text_color(text_dim()).child(format!("{:.0}", c.volume)))
                                         ),
                                 );
                             }
@@ -948,7 +922,7 @@ impl Render for CandleChart {
                     .gap(px(candle_gap))
                     .px(px(8.))
                     .border_t_1()
-                    .border_color(rgb(0x0f3460))
+                    .border_color(border_primary())
                     .children(visible.iter().enumerate().map(|(i, candle)| {
                         let vol_pct = candle.volume / vol_max;
                         let bar_h = (vol_pct * volume_height as f64).max(1.0) as f32;
@@ -1004,17 +978,17 @@ impl CandleChart {
 
         if let Some(c) = visible.last() {
             let price_color = if c.close >= c.open {
-                rgb(0x00ff88)
+                color_green()
             } else {
-                rgb(0xff4444)
+                color_red()
             };
 
             let entries: Vec<(&str, String, gpui::Rgba)> = vec![
-                ("O", format!("{:.2}", c.open), rgb(0xaaaaaa)),
-                ("H", format!("{:.2}", c.high), rgb(0xaaaaaa)),
-                ("L", format!("{:.2}", c.low), rgb(0xaaaaaa)),
+                ("O", format!("{:.2}", c.open), text_dim()),
+                ("H", format!("{:.2}", c.high), text_dim()),
+                ("L", format!("{:.2}", c.low), text_dim()),
                 ("C", format!("{:.2}", c.close), price_color),
-                ("Vol", format!("{:.0}", c.volume), rgb(0xaaaaaa)),
+                ("Vol", format!("{:.0}", c.volume), text_dim()),
             ];
 
             for (label, val, color) in entries {
@@ -1025,7 +999,7 @@ impl CandleChart {
                         .child(
                             div()
                                 .text_size(px(11.))
-                                .text_color(rgb(0x666666))
+                                .text_color(text_disabled())
                                 .child(label.to_string()),
                         )
                         .child(div().text_size(px(11.)).text_color(color).child(val)),
@@ -1069,7 +1043,7 @@ impl CandleChart {
                 let price = price_min + (i as f64 / 4.0) * (price_max - price_min);
                 div()
                     .text_size(px(10.))
-                    .text_color(rgb(0x666666))
+                    .text_color(text_disabled())
                     .child(format!("{:.2}", price))
             }))
     }
@@ -1135,9 +1109,9 @@ impl CandleChart {
             // Histogram bar
             if let Some(hist) = histogram {
                 let color = if *hist >= 0.0 {
-                    rgb(0x00ff88)
+                    color_green()
                 } else {
-                    rgb(0xff4444)
+                    color_red()
                 };
                 let val_y =
                     height - (((*hist - macd_min) / macd_range) * height as f64) as f32;
@@ -1192,7 +1166,7 @@ impl CandleChart {
             .w_full()
             .relative()
             .border_t_1()
-            .border_color(rgb(0x0f3460))
+            .border_color(border_primary())
             // Label
             .child(
                 div()
@@ -1200,7 +1174,7 @@ impl CandleChart {
                     .top(px(2.0))
                     .left(px(4.0))
                     .text_size(px(10.))
-                    .text_color(rgb(0x666666))
+                    .text_color(text_disabled())
                     .child("MACD"),
             )
             .child(macd_overlay)
@@ -1286,7 +1260,7 @@ impl CandleChart {
             .w_full()
             .relative()
             .border_t_1()
-            .border_color(rgb(0x0f3460))
+            .border_color(border_primary())
             // Label with value
             .child(
                 div()
@@ -1294,7 +1268,7 @@ impl CandleChart {
                     .top(px(2.0))
                     .left(px(4.0))
                     .text_size(px(10.))
-                    .text_color(rgb(0x666666))
+                    .text_color(text_disabled())
                     .child(rsi_label),
             )
             // 70 label

@@ -1,7 +1,8 @@
 use gpui::prelude::*;
-use gpui::{div, px, rgb, Entity, EventEmitter, SharedString};
+use gpui::{div, px, Entity, EventEmitter, SharedString};
 use gpui_component::input::{Input, InputState};
 
+use crate::components::theme::*;
 use crate::models::Symbol;
 
 /// Emitted when the user clicks a symbol in the list.
@@ -57,13 +58,13 @@ impl Render for SymbolList {
             .h_full()
             .flex()
             .flex_col()
-            .bg(rgb(0x16213e))
+            .bg(bg_panel())
             // Header
             .child(
                 div()
                     .p(px(8.))
                     .border_b_1()
-                    .border_color(rgb(0x0f3460))
+                    .border_color(border_primary())
                     .child(Input::new(&self.filter_input)),
             )
             // Symbol rows - scrollable
@@ -75,11 +76,7 @@ impl Render for SymbolList {
                     .children(filtered.into_iter().map(|symbol| {
                         let is_selected = symbol.name == selected;
                         let name = symbol.name.clone();
-                        let change_color = if symbol.change_24h >= 0.0 {
-                            rgb(0x00ff88)
-                        } else {
-                            rgb(0xff4444)
-                        };
+                        let change_color = pnl_color(symbol.change_24h);
                         let change_str = format!("{:+.2}%", symbol.change_24h);
                         let price_str = format_price(symbol.last_price);
                         let sym_name = name.clone();
@@ -94,11 +91,11 @@ impl Render for SymbolList {
                             .items_center()
                             .cursor_pointer()
                             .bg(if is_selected {
-                                rgb(0x0f3460)
+                                bg_header()
                             } else {
-                                rgb(0x16213e)
+                                bg_panel()
                             })
-                            .hover(|s| s.bg(rgb(0x1a3a6e)))
+                            .hover(|s| s.bg(bg_hover()))
                             .on_click(cx.listener(move |this, _, _w, cx| {
                                 this.selected = sym_name.clone();
                                 cx.emit(SymbolSelected(sym_name.clone()));
@@ -108,9 +105,9 @@ impl Render for SymbolList {
                                 div()
                                     .text_size(px(13.))
                                     .text_color(if is_selected {
-                                        rgb(0xffffff)
+                                        text_primary()
                                     } else {
-                                        rgb(0xcccccc)
+                                        text_muted()
                                     })
                                     .child(name),
                             )
@@ -123,7 +120,7 @@ impl Render for SymbolList {
                                     .child(
                                         div()
                                             .text_size(px(12.))
-                                            .text_color(rgb(0xdddddd))
+                                            .text_color(text_secondary())
                                             .child(price_str),
                                     )
                                     .child(

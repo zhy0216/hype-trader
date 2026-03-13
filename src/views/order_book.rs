@@ -1,6 +1,7 @@
 use gpui::prelude::*;
-use gpui::{div, px, rgb, SharedString};
+use gpui::{div, px, SharedString};
 
+use crate::components::theme::*;
 use crate::models::OrderBook as OrderBookData;
 
 pub struct OrderBookView {
@@ -35,32 +36,32 @@ impl Render for OrderBookView {
             .h_full()
             .flex()
             .flex_col()
-            .bg(rgb(0x16213e))
+            .bg(bg_panel())
             // Header
             .child(
                 div()
                     .px(px(10.))
                     .py(px(6.))
                     .border_b_1()
-                    .border_color(rgb(0x0f3460))
+                    .border_color(border_primary())
                     .flex()
                     .justify_between()
                     .child(
                         div()
                             .text_size(px(13.))
-                            .text_color(rgb(0xaaaaaa))
+                            .text_color(text_dim())
                             .child("Price"),
                     )
                     .child(
                         div()
                             .text_size(px(13.))
-                            .text_color(rgb(0xaaaaaa))
+                            .text_color(text_dim())
                             .child("Size"),
                     )
                     .child(
                         div()
                             .text_size(px(13.))
-                            .text_color(rgb(0xaaaaaa))
+                            .text_color(text_dim())
                             .child("Total"),
                     ),
             )
@@ -75,7 +76,7 @@ impl Render for OrderBookView {
                     .children(
                         self.data.asks.iter().enumerate().map(|(i, level)| {
                             let _bar_pct = (level.cumulative / max_cum * 100.0).min(100.0);
-                            render_level(i, level.price, level.size, level.cumulative, rgb(0xff4444), "ask")
+                            render_level(i, level.price, level.size, level.cumulative, color_red(), "ask")
                         }),
                     ),
             )
@@ -88,11 +89,11 @@ impl Render for OrderBookView {
                     .justify_center()
                     .border_t_1()
                     .border_b_1()
-                    .border_color(rgb(0x0f3460))
+                    .border_color(border_primary())
                     .child(
                         div()
                             .text_size(px(18.))
-                            .text_color(rgb(0xffffff))
+                            .text_color(text_primary())
                             .child(format!("{:.2}", last_price)),
                     ),
             )
@@ -107,7 +108,7 @@ impl Render for OrderBookView {
                     .children(
                         self.data.bids.iter().enumerate().map(|(i, level)| {
                             let _bar_pct = (level.cumulative / max_cum * 100.0).min(100.0);
-                            render_level(i, level.price, level.size, level.cumulative, rgb(0x00ff88), "bid")
+                            render_level(i, level.price, level.size, level.cumulative, color_green(), "bid")
                         }),
                     ),
             )
@@ -138,13 +139,13 @@ fn render_level(
         .child(
             div()
                 .text_size(px(12.))
-                .text_color(rgb(0xcccccc))
+                .text_color(text_muted())
                 .child(format!("{:.3}", size)),
         )
         .child(
             div()
                 .text_size(px(12.))
-                .text_color(rgb(0x999999))
+                .text_color(text_dimmer())
                 .child(format!("{:.3}", cumulative)),
         )
 }

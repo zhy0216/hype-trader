@@ -1,10 +1,13 @@
 use gpui::prelude::*;
-use gpui::{div, px, rgb, Entity};
+use gpui::{div, px, Entity};
 use gpui_component::button::{Button, ButtonVariants as _};
-use gpui_component::input::{Input, InputState};
+use gpui_component::input::InputState;
 
 use gpui_component::Disableable as _;
 
+use crate::components::theme::*;
+use crate::components::toggle_button::toggle_button;
+use crate::components::input_field::input_field;
 use crate::models::{Network, OrderSide, OrderType};
 use crate::services::exchange_service::ExchangeService;
 use crate::services::wallet_service;
@@ -69,59 +72,33 @@ impl Render for OrderPanel {
             .flex()
             .flex_col()
             .gap(px(10.))
-            .bg(rgb(0x16213e))
+            .bg(bg_panel())
             // Order type tabs
             .child(
                 div()
                     .flex()
                     .gap(px(4.))
                     .child(
-                        Button::new("type-limit")
-                            .label("Limit")
-                            .compact()
-                            .map(|b| {
-                                if self.order_type == OrderType::Limit {
-                                    b.primary()
-                                } else {
-                                    b.ghost()
-                                }
-                            })
+                        toggle_button("type-limit", "Limit", self.order_type == OrderType::Limit)
                             .on_click(cx.listener(|this, _, _w, _cx| {
                                 this.order_type = OrderType::Limit;
                             })),
                     )
                     .child(
-                        Button::new("type-market")
-                            .label("Market")
-                            .compact()
-                            .map(|b| {
-                                if self.order_type == OrderType::Market {
-                                    b.primary()
-                                } else {
-                                    b.ghost()
-                                }
-                            })
+                        toggle_button("type-market", "Market", self.order_type == OrderType::Market)
                             .on_click(cx.listener(|this, _, _w, _cx| {
                                 this.order_type = OrderType::Market;
                             })),
                     )
                     .child(
-                        Button::new("type-tpsl")
-                            .label("TP/SL")
-                            .compact()
-                            .map(|b| {
-                                if matches!(
-                                    self.order_type,
-                                    OrderType::TakeProfit | OrderType::StopLoss
-                                ) {
-                                    b.primary()
-                                } else {
-                                    b.ghost()
-                                }
-                            })
-                            .on_click(cx.listener(|this, _, _w, _cx| {
-                                this.order_type = OrderType::TakeProfit;
-                            })),
+                        toggle_button(
+                            "type-tpsl",
+                            "TP/SL",
+                            matches!(self.order_type, OrderType::TakeProfit | OrderType::StopLoss),
+                        )
+                        .on_click(cx.listener(|this, _, _w, _cx| {
+                            this.order_type = OrderType::TakeProfit;
+                        })),
                     ),
             )
             // Buy / Sell toggle
@@ -130,33 +107,15 @@ impl Render for OrderPanel {
                     .flex()
                     .gap(px(4.))
                     .child(
-                        Button::new("side-buy")
-                            .label("Buy / Long")
-                            .compact()
+                        toggle_button("side-buy", "Buy / Long", self.side == OrderSide::Buy)
                             .w_full()
-                            .map(|b| {
-                                if self.side == OrderSide::Buy {
-                                    b.primary()
-                                } else {
-                                    b.ghost()
-                                }
-                            })
                             .on_click(cx.listener(|this, _, _w, _cx| {
                                 this.side = OrderSide::Buy;
                             })),
                     )
                     .child(
-                        Button::new("side-sell")
-                            .label("Sell / Short")
-                            .compact()
+                        toggle_button("side-sell", "Sell / Short", self.side == OrderSide::Sell)
                             .w_full()
-                            .map(|b| {
-                                if self.side == OrderSide::Sell {
-                                    b.primary()
-                                } else {
-                                    b.ghost()
-                                }
-                            })
                             .on_click(cx.listener(|this, _, _w, _cx| {
                                 this.side = OrderSide::Sell;
                             })),
@@ -165,36 +124,12 @@ impl Render for OrderPanel {
 
         // Price input (only for Limit / TP-SL, not Market)
         if show_price {
-            root = root.child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(4.))
-                    .child(
-                        div()
-                            .text_size(px(12.))
-                            .text_color(rgb(0xaaaaaa))
-                            .child("Price"),
-                    )
-                    .child(Input::new(&self.price_input)),
-            );
+            root = root.child(input_field("Price", &self.price_input));
         }
 
         root
             // Size input
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(4.))
-                    .child(
-                        div()
-                            .text_size(px(12.))
-                            .text_color(rgb(0xaaaaaa))
-                            .child("Size"),
-                    )
-                    .child(Input::new(&self.size_input)),
-            )
+            .child(input_field("Size", &self.size_input))
             // Percentage buttons
             .child(
                 div()

@@ -79,6 +79,12 @@ fn main() {
     Application::new().run(move |cx| {
         gpui_component::init(cx);
 
+        // Quit the application when the window is closed.
+        cx.on_window_closed(|cx| {
+            cx.quit();
+        })
+        .detach();
+
         cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(Bounds::centered(

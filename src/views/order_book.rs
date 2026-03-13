@@ -37,35 +37,51 @@ impl Render for OrderBookView {
             .flex()
             .flex_col()
             .bg(bg_panel())
-            // Header
+            .border_l_1()
+            .border_color(border_primary())
+            // Title
             .child(
                 div()
-                    .px(px(10.))
-                    .py(px(6.))
+                    .px(px(12.))
+                    .py(px(8.))
+                    .border_b_1()
+                    .border_color(border_primary())
+                    .child(
+                        div()
+                            .text_size(px(12.))
+                            .text_color(text_muted())
+                            .child("Order Book"),
+                    ),
+            )
+            // Column Header
+            .child(
+                div()
+                    .px(px(12.))
+                    .py(px(5.))
                     .border_b_1()
                     .border_color(border_primary())
                     .flex()
                     .justify_between()
                     .child(
                         div()
-                            .text_size(px(13.))
-                            .text_color(text_dim())
-                            .child("Price"),
+                            .text_size(px(10.))
+                            .text_color(text_dimmest())
+                            .child("PRICE"),
                     )
                     .child(
                         div()
-                            .text_size(px(13.))
-                            .text_color(text_dim())
-                            .child("Size"),
+                            .text_size(px(10.))
+                            .text_color(text_dimmest())
+                            .child("SIZE"),
                     )
                     .child(
                         div()
-                            .text_size(px(13.))
-                            .text_color(text_dim())
-                            .child("Total"),
+                            .text_size(px(10.))
+                            .text_color(text_dimmest())
+                            .child("TOTAL"),
                     ),
             )
-            // Asks (reversed - highest price at top, push to bottom of section)
+            // Asks (reversed - highest price at top)
             .child(
                 div()
                     .flex_1()
@@ -75,8 +91,8 @@ impl Render for OrderBookView {
                     .flex_col()
                     .children(
                         self.data.asks.iter().enumerate().map(|(i, level)| {
-                            let _bar_pct = (level.cumulative / max_cum * 100.0).min(100.0);
-                            render_level(i, level.price, level.size, level.cumulative, color_red(), "ask")
+                            let bar_pct = (level.cumulative / max_cum * 100.0).min(100.0);
+                            render_level(i, level.price, level.size, level.cumulative, color_sell(), color_sell_bg(), bar_pct, "ask")
                         }),
                     ),
             )
@@ -84,15 +100,18 @@ impl Render for OrderBookView {
             .child(
                 div()
                     .py(px(8.))
-                    .px(px(10.))
+                    .px(px(12.))
                     .flex()
                     .justify_center()
+                    .items_center()
+                    .gap(px(8.))
+                    .bg(bg_header())
                     .border_t_1()
                     .border_b_1()
-                    .border_color(border_primary())
+                    .border_color(border_accent())
                     .child(
                         div()
-                            .text_size(px(18.))
+                            .text_size(px(16.))
                             .text_color(text_primary())
                             .child(format!("{:.2}", last_price)),
                     ),
@@ -107,8 +126,8 @@ impl Render for OrderBookView {
                     .flex_col()
                     .children(
                         self.data.bids.iter().enumerate().map(|(i, level)| {
-                            let _bar_pct = (level.cumulative / max_cum * 100.0).min(100.0);
-                            render_level(i, level.price, level.size, level.cumulative, color_green(), "bid")
+                            let bar_pct = (level.cumulative / max_cum * 100.0).min(100.0);
+                            render_level(i, level.price, level.size, level.cumulative, color_buy(), color_buy_bg(), bar_pct, "bid")
                         }),
                     ),
             )
@@ -121,15 +140,18 @@ fn render_level(
     size: f64,
     cumulative: f64,
     text_color: gpui::Rgba,
+    _bg_tint: gpui::Rgba,
+    _bar_pct: f64,
     prefix: &str,
 ) -> impl IntoElement {
     div()
         .id(SharedString::from(format!("{}-{}", prefix, index)))
         .w_full()
-        .px(px(10.))
+        .px(px(12.))
         .py(px(2.))
         .flex()
         .justify_between()
+        .hover(|s| s.bg(bg_hover()))
         .child(
             div()
                 .text_size(px(12.))
@@ -139,13 +161,13 @@ fn render_level(
         .child(
             div()
                 .text_size(px(12.))
-                .text_color(text_muted())
+                .text_color(text_secondary())
                 .child(format!("{:.3}", size)),
         )
         .child(
             div()
                 .text_size(px(12.))
-                .text_color(text_dimmer())
+                .text_color(text_dim())
                 .child(format!("{:.3}", cumulative)),
         )
 }

@@ -21,7 +21,7 @@ pub struct SymbolList {
 impl SymbolList {
     pub fn new(window: &mut gpui::Window, cx: &mut gpui::Context<Self>) -> Self {
         let filter_input = cx.new(|cx| {
-            InputState::new(window, cx).placeholder("Search symbol...")
+            InputState::new(window, cx).placeholder("Search...")
         });
         Self {
             symbols: Vec::new(),
@@ -54,18 +54,44 @@ impl Render for SymbolList {
         let selected = self.selected.clone();
 
         div()
-            .w(px(200.))
+            .w(px(220.))
             .h_full()
             .flex()
             .flex_col()
             .bg(bg_panel())
-            // Header
+            .border_r_1()
+            .border_color(border_primary())
+            // Header with search
             .child(
                 div()
-                    .p(px(8.))
+                    .px(px(10.))
+                    .py(px(8.))
                     .border_b_1()
                     .border_color(border_primary())
                     .child(Input::new(&self.filter_input)),
+            )
+            // Column headers
+            .child(
+                div()
+                    .w_full()
+                    .px(px(12.))
+                    .py(px(6.))
+                    .flex()
+                    .justify_between()
+                    .border_b_1()
+                    .border_color(border_primary())
+                    .child(
+                        div()
+                            .text_size(px(10.))
+                            .text_color(text_dimmest())
+                            .child("PAIR"),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(10.))
+                            .text_color(text_dimmest())
+                            .child("PRICE / 24H"),
+                    ),
             )
             // Symbol rows - scrollable
             .child(
@@ -84,16 +110,19 @@ impl Render for SymbolList {
                         div()
                             .id(SharedString::from(format!("sym-{}", name)))
                             .w_full()
-                            .px(px(10.))
-                            .py(px(6.))
+                            .px(px(12.))
+                            .py(px(7.))
                             .flex()
                             .justify_between()
                             .items_center()
                             .cursor_pointer()
                             .bg(if is_selected {
-                                bg_header()
+                                bg_hover()
                             } else {
                                 bg_panel()
+                            })
+                            .when(is_selected, |el| {
+                                el.border_l_2().border_color(color_brand())
                             })
                             .hover(|s| s.bg(bg_hover()))
                             .on_click(cx.listener(move |this, _, _w, cx| {
@@ -107,7 +136,7 @@ impl Render for SymbolList {
                                     .text_color(if is_selected {
                                         text_primary()
                                     } else {
-                                        text_muted()
+                                        text_secondary()
                                     })
                                     .child(name),
                             )
@@ -117,15 +146,16 @@ impl Render for SymbolList {
                                     .flex()
                                     .flex_col()
                                     .items_end()
+                                    .gap(px(1.))
                                     .child(
                                         div()
                                             .text_size(px(12.))
-                                            .text_color(text_secondary())
+                                            .text_color(text_primary())
                                             .child(price_str),
                                     )
                                     .child(
                                         div()
-                                            .text_size(px(11.))
+                                            .text_size(px(10.))
                                             .text_color(change_color)
                                             .child(change_str),
                                     ),

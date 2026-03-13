@@ -65,6 +65,7 @@ impl Render for OrderPanel {
         cx: &mut gpui::Context<Self>,
     ) -> impl IntoElement {
         let show_price = self.order_type != OrderType::Market;
+        let is_buy = self.side == OrderSide::Buy;
 
         let mut root = div()
             .w_full()
@@ -73,11 +74,13 @@ impl Render for OrderPanel {
             .flex_col()
             .gap(px(10.))
             .bg(bg_panel())
+            .border_t_1()
+            .border_color(border_primary())
             // Order type tabs
             .child(
                 div()
                     .flex()
-                    .gap(px(4.))
+                    .gap(px(2.))
                     .child(
                         toggle_button("type-limit", "Limit", self.order_type == OrderType::Limit)
                             .on_click(cx.listener(|this, _, _w, _cx| {
@@ -101,25 +104,39 @@ impl Render for OrderPanel {
                         })),
                     ),
             )
-            // Buy / Sell toggle
+            // Buy / Sell toggle with colored backgrounds
             .child(
                 div()
                     .flex()
                     .gap(px(4.))
-                    .child(
-                        toggle_button("side-buy", "Buy / Long", self.side == OrderSide::Buy)
-                            .w_full()
-                            .on_click(cx.listener(|this, _, _w, _cx| {
-                                this.side = OrderSide::Buy;
-                            })),
-                    )
-                    .child(
-                        toggle_button("side-sell", "Sell / Short", self.side == OrderSide::Sell)
-                            .w_full()
-                            .on_click(cx.listener(|this, _, _w, _cx| {
-                                this.side = OrderSide::Sell;
-                            })),
-                    ),
+                    .child({
+                        let btn = Button::new("side-buy")
+                            .label("Buy / Long")
+                            .compact()
+                            .w_full();
+                        if is_buy {
+                            btn.primary()
+                        } else {
+                            btn.ghost()
+                        }
+                        .on_click(cx.listener(|this, _, _w, _cx| {
+                            this.side = OrderSide::Buy;
+                        }))
+                    })
+                    .child({
+                        let btn = Button::new("side-sell")
+                            .label("Sell / Short")
+                            .compact()
+                            .w_full();
+                        if !is_buy {
+                            btn.danger()
+                        } else {
+                            btn.ghost()
+                        }
+                        .on_click(cx.listener(|this, _, _w, _cx| {
+                            this.side = OrderSide::Sell;
+                        }))
+                    }),
             );
 
         // Price input (only for Limit / TP-SL, not Market)
@@ -141,16 +158,20 @@ impl Render for OrderPanel {
                     .child(Button::new("pct-100").label("100%").compact().ghost()),
             )
             // Submit button
-            .child(
-                Button::new("submit-order")
+            .child({
+                let btn = Button::new("submit-order")
                     .label(match self.side {
                         OrderSide::Buy => "Buy / Long",
                         OrderSide::Sell => "Sell / Short",
                     })
-                    .primary()
                     .w_full()
-                    .disabled(!self.wallet_connected)
-                    .on_click(cx.listener(|this, _, window, cx| {
+                    .disabled(!self.wallet_connected);
+                let btn = if is_buy {
+                    btn.primary()
+                } else {
+                    btn.danger()
+                };
+                btn.on_click(cx.listener(|this, _, window, cx| {
                         let Some(ref key) = this.private_key else {
                             tracing::error!("No private key available for order submission");
                             return;
@@ -253,7 +274,7 @@ impl Render for OrderPanel {
                             }
                         })
                         .detach();
-                    })),
-            )
+                    }))
+            })
     }
 }

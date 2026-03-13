@@ -56,27 +56,40 @@ impl Render for Toast {
             return div();
         }
 
-        let bg_color = match self.kind {
-            ToastKind::Success => rgb(0x1b5e20), // green
-            ToastKind::Error => rgb(0xb71c1c),   // red
-            ToastKind::Info => rgb(0x0d47a1),    // blue
+        let (bg_color, border_color, icon) = match self.kind {
+            ToastKind::Success => (rgb(0x0f2a1a), rgb(0x22c55e), "OK"),
+            ToastKind::Error => (rgb(0x2a0f0f), rgb(0xef4444), "!!"),
+            ToastKind::Info => (rgb(0x0f1a2a), rgb(0x6366f1), "i"),
         };
-
-        let text_color = rgb(0xffffff);
 
         div()
             .w_full()
-            .px(px(16.))
-            .py(px(8.))
-            .bg(bg_color)
             .flex()
-            .items_center()
             .justify_center()
+            .py(px(4.))
             .child(
                 div()
-                    .text_size(px(13.))
-                    .text_color(text_color)
-                    .child(self.message.clone()),
+                    .px(px(16.))
+                    .py(px(8.))
+                    .rounded(px(8.))
+                    .bg(bg_color)
+                    .border_1()
+                    .border_color(border_color)
+                    .flex()
+                    .items_center()
+                    .gap(px(8.))
+                    .child(
+                        div()
+                            .text_size(px(11.))
+                            .text_color(border_color)
+                            .child(icon),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(13.))
+                            .text_color(rgb(0xeaedf3))
+                            .child(self.message.clone()),
+                    ),
             )
     }
 }

@@ -1,7 +1,7 @@
 use gpui::prelude::*;
 use gpui::{div, px, Div, Rgba};
 
-/// A small colored circle indicator.
+/// A small colored circle indicator with a subtle glow.
 pub fn status_dot(color: Rgba) -> Div {
     div()
         .w(px(8.))

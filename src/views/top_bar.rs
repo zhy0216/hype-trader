@@ -41,12 +41,18 @@ impl Render for TopBar {
             ConnectionStatus::Disconnected => color_red(),
         };
 
+        let status_label = match self.connection_status {
+            ConnectionStatus::Connected => "Connected",
+            ConnectionStatus::Connecting => "Connecting...",
+            ConnectionStatus::Disconnected => "Disconnected",
+        };
+
         div()
-            .h(gpui::px(48.))
+            .h(gpui::px(44.))
             .w_full()
             .bg(bg_header())
             .border_b_1()
-            .border_color(border_accent())
+            .border_color(border_primary())
             .flex()
             .items_center()
             .justify_between()
@@ -56,12 +62,18 @@ impl Render for TopBar {
                 div()
                     .flex()
                     .items_center()
-                    .gap(gpui::px(12.))
+                    .gap(gpui::px(10.))
                     .child(
                         div()
-                            .text_size(gpui::px(18.))
+                            .text_size(gpui::px(16.))
                             .text_color(color_brand())
                             .child("Hype Trader"),
+                    )
+                    .child(
+                        div()
+                            .text_size(gpui::px(11.))
+                            .text_color(text_dimmer())
+                            .child("v0.1"),
                     ),
             )
             // Center section - network toggle + connection status
@@ -69,40 +81,63 @@ impl Render for TopBar {
                 div()
                     .flex()
                     .items_center()
-                    .gap(gpui::px(8.))
-                    // Status dot
-                    .child(status_dot(status_color))
+                    .gap(gpui::px(12.))
                     .child(
-                        toggle_button("mainnet-btn", "Mainnet", self.network == Network::Mainnet)
-                            .on_click(cx.listener(|this, _, _w, _cx| {
-                                this.network = Network::Mainnet;
-                            })),
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(gpui::px(6.))
+                            .child(status_dot(status_color))
+                            .child(
+                                div()
+                                    .text_size(gpui::px(11.))
+                                    .text_color(text_dim())
+                                    .child(status_label),
+                            ),
                     )
                     .child(
-                        toggle_button("testnet-btn", "Testnet", self.network == Network::Testnet)
-                            .on_click(cx.listener(|this, _, _w, _cx| {
-                                this.network = Network::Testnet;
-                            })),
+                        div()
+                            .flex()
+                            .gap(gpui::px(2.))
+                            .child(
+                                toggle_button("mainnet-btn", "Mainnet", self.network == Network::Mainnet)
+                                    .on_click(cx.listener(|this, _, _w, _cx| {
+                                        this.network = Network::Mainnet;
+                                    })),
+                            )
+                            .child(
+                                toggle_button("testnet-btn", "Testnet", self.network == Network::Testnet)
+                                    .on_click(cx.listener(|this, _, _w, _cx| {
+                                        this.network = Network::Testnet;
+                                    })),
+                            ),
                     ),
             )
-            // Right section - balance + address + theme toggle + settings
+            // Right section - balance + address + theme toggle
             .child(
                 div()
                     .flex()
                     .items_center()
-                    .gap(gpui::px(12.))
+                    .gap(gpui::px(16.))
                     .child(
                         div()
-                            .text_size(gpui::px(14.))
+                            .text_size(gpui::px(13.))
                             .text_color(color_green())
                             .child(format!("${:.2}", self.balance)),
                     )
                     .when_some(self.address.clone(), |el, addr| {
                         el.child(
                             div()
-                                .text_size(gpui::px(12.))
-                                .text_color(text_dim())
-                                .child(addr),
+                                .px(gpui::px(8.))
+                                .py(gpui::px(3.))
+                                .rounded(gpui::px(4.))
+                                .bg(bg_primary())
+                                .child(
+                                    div()
+                                        .text_size(gpui::px(11.))
+                                        .text_color(text_dim())
+                                        .child(addr),
+                                ),
                         )
                     })
                     .child(
@@ -119,12 +154,6 @@ impl Render for TopBar {
                                     ThemeMode::Light => ThemeMode::Dark,
                                 };
                             })),
-                    )
-                    .child(
-                        Button::new("settings-btn")
-                            .label("Settings")
-                            .compact()
-                            .ghost(),
                     ),
             )
     }

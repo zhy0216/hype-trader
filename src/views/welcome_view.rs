@@ -177,14 +177,14 @@ impl WelcomeView {
             .gap(gpui::px(6.))
             .child(
                 div()
-                    .text_size(gpui::px(13.))
-                    .text_color(text_secondary())
+                    .text_size(gpui::px(12.))
+                    .text_color(text_muted())
                     .child("Network"),
             )
             .child(
                 div()
                     .flex()
-                    .gap(gpui::px(8.))
+                    .gap(gpui::px(4.))
                     .child(
                         Button::new("mainnet")
                             .label("Mainnet")
@@ -193,7 +193,7 @@ impl WelcomeView {
                                 if self.network == Network::Mainnet {
                                     btn.primary()
                                 } else {
-                                    btn.outline().text_color(gpui::hsla(0., 0., 0.8, 1.))
+                                    btn.outline()
                                 }
                             })
                             .on_click(cx.listener(|this, _, _w, _cx| {
@@ -208,7 +208,7 @@ impl WelcomeView {
                                 if self.network == Network::Testnet {
                                     btn.primary()
                                 } else {
-                                    btn.outline().text_color(gpui::hsla(0., 0., 0.8, 1.))
+                                    btn.outline()
                                 }
                             })
                             .on_click(cx.listener(|this, _, _w, _cx| {
@@ -230,9 +230,16 @@ impl WelcomeView {
                     .justify_center()
                     .child(
                         div()
-                            .text_size(gpui::px(13.))
-                            .text_color(color_success())
-                            .child("Saved wallet found"),
+                            .px(gpui::px(12.))
+                            .py(gpui::px(6.))
+                            .rounded(gpui::px(6.))
+                            .bg(color_buy_bg())
+                            .child(
+                                div()
+                                    .text_size(gpui::px(12.))
+                                    .text_color(color_success())
+                                    .child("Saved wallet found"),
+                            ),
                     ),
             )
             // Password input
@@ -255,9 +262,8 @@ impl WelcomeView {
                     .child(
                         Button::new("use-different")
                             .label("Use a different wallet")
-                            .outline()
+                            .ghost()
                             .compact()
-                            .text_color(gpui::hsla(0., 0., 0.75, 1.))
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.mode = WelcomeMode::Fresh;
                                 this.saved_encrypted_key = None;
@@ -294,7 +300,7 @@ impl WelcomeView {
                                 if self.remember {
                                     btn.primary()
                                 } else {
-                                    btn.outline().text_color(gpui::hsla(0., 0., 0.8, 1.))
+                                    btn.ghost()
                                 }
                             })
                             .on_click(cx.listener(|this, _, _w, _cx| {
@@ -329,36 +335,32 @@ impl Render for WelcomeView {
             .bg(bg_primary())
             .child(
                 div()
-                    .w(gpui::px(420.))
-                    .p(gpui::px(32.))
+                    .w(gpui::px(400.))
+                    .p(gpui::px(36.))
                     .rounded(gpui::px(12.))
                     .bg(bg_card())
                     .border_1()
-                    .border_color(border_card())
+                    .border_color(border_accent())
                     .flex()
                     .flex_col()
-                    .gap(gpui::px(20.))
+                    .gap(gpui::px(24.))
                     // Title
                     .child(
                         div()
                             .flex()
-                            .justify_center()
+                            .flex_col()
+                            .items_center()
+                            .gap(gpui::px(8.))
                             .child(
                                 div()
-                                    .text_size(gpui::px(24.))
+                                    .text_size(gpui::px(22.))
                                     .text_color(color_brand())
                                     .child("Hype Trader"),
-                            ),
-                    )
-                    // Subtitle
-                    .child(
-                        div()
-                            .flex()
-                            .justify_center()
+                            )
                             .child(
                                 div()
                                     .text_size(gpui::px(13.))
-                                    .text_color(text_muted())
+                                    .text_color(text_dim())
                                     .child("Hyperliquid Trading Client"),
                             ),
                     )
@@ -375,22 +377,33 @@ impl Render for WelcomeView {
                     .when_some(self.error_message.clone(), |el, msg| {
                         el.child(
                             div()
-                                .text_size(gpui::px(12.))
-                                .text_color(color_red())
-                                .child(msg),
+                                .px(gpui::px(12.))
+                                .py(gpui::px(8.))
+                                .rounded(gpui::px(6.))
+                                .bg(color_sell_bg())
+                                .child(
+                                    div()
+                                        .text_size(gpui::px(12.))
+                                        .text_color(color_red())
+                                        .child(msg),
+                                ),
                         )
                     })
-                    // Divider text
+                    // Divider
                     .child(
                         div()
+                            .w_full()
                             .flex()
-                            .justify_center()
+                            .items_center()
+                            .gap(gpui::px(12.))
+                            .child(div().flex_1().h(gpui::px(1.)).bg(border_primary()))
                             .child(
                                 div()
-                                    .text_size(gpui::px(12.))
-                                    .text_color(text_dim())
+                                    .text_size(gpui::px(11.))
+                                    .text_color(text_dimmest())
                                     .child("or"),
-                            ),
+                            )
+                            .child(div().flex_1().h(gpui::px(1.)).bg(border_primary())),
                     )
                     // Read-only mode
                     .child(
@@ -398,7 +411,6 @@ impl Render for WelcomeView {
                             .label("Browse Market (Read-only)")
                             .outline()
                             .w_full()
-                            .text_color(gpui::hsla(0., 0., 0.75, 1.))
                             .on_click(cx.listener(|this, _, _w, cx| {
                                 cx.emit(WelcomeEvent::BrowseReadOnly {
                                     network: this.network,

@@ -11,17 +11,18 @@ pub fn table_header(headers: &[(&str, f32)]) -> Div {
             div()
                 .w(px(*w))
                 .text_size(px(11.))
-                .text_color(text_dimmest())
+                .text_color(text_dim())
                 .child(header.to_string())
         })
         .collect();
 
     div()
         .w_full()
-        .px(px(10.))
-        .py(px(6.))
+        .px(px(12.))
+        .py(px(8.))
         .flex()
         .items_center()
+        .bg(bg_header())
         .border_b_1()
         .border_color(border_primary())
         .children(items)
@@ -40,18 +41,19 @@ pub fn table_cell(width: f32, text: impl Into<String>, color: gpui::Rgba) -> Div
 pub fn table_row(index: usize) -> Div {
     div()
         .w_full()
-        .px(px(10.))
-        .py(px(4.))
+        .px(px(12.))
+        .py(px(6.))
         .flex()
         .items_center()
         .bg(row_bg(index))
+        .hover(|s| s.bg(bg_hover()))
 }
 
 /// Empty state placeholder for tables with no data.
 pub fn empty_state(message: &str) -> Div {
     div()
         .w_full()
-        .py(px(20.))
+        .py(px(32.))
         .flex()
         .justify_center()
         .child(

@@ -848,12 +848,12 @@ impl Render for CandleChart {
                                             .absolute()
                                             .top(px(label_y))
                                             .right(px(4.0))
-                                            .bg(rgb(0x333355))
+                                            .bg(rgb(0x252a3a))
                                             .rounded(px(2.0))
                                             .px(px(4.0))
                                             .py(px(1.0))
                                             .text_size(px(10.0))
-                                            .text_color(rgb(0xeeeeee))
+                                            .text_color(rgb(0xeaedf3))
                                             .child(format!("{:.2}", price)),
                                     );
                                 }
@@ -863,7 +863,7 @@ impl Render for CandleChart {
                             if candle_idx < visible.len() {
                                 let c = &visible[candle_idx];
                                 let is_bullish = c.close >= c.open;
-                                let color = if is_bullish { 0x00ff88 } else { 0xff4444 };
+                                let color = if is_bullish { 0x22c55e } else { 0xef4444 };
                                 let tooltip_x = (local_x + 12.0).min(total_chart_width - 140.0).max(0.0);
                                 let tooltip_y = (local_y + 12.0).min(chart_height - 80.0).max(0.0);
 
@@ -872,9 +872,9 @@ impl Render for CandleChart {
                                         .absolute()
                                         .top(px(tooltip_y))
                                         .left(px(tooltip_x))
-                                        .bg(gpui::rgba(0x1a1a2eee))
+                                        .bg(gpui::rgba(0x151822ee))
                                         .border_1()
-                                        .border_color(rgb(0x333355))
+                                        .border_color(rgb(0x2d3348))
                                         .rounded(px(4.0))
                                         .px(px(6.0))
                                         .py(px(4.0))
@@ -927,9 +927,9 @@ impl Render for CandleChart {
                         let vol_pct = candle.volume / vol_max;
                         let bar_h = (vol_pct * volume_height as f64).max(1.0) as f32;
                         let color = if candle.close >= candle.open {
-                            rgb(0x1a6644)
+                            rgb(0x133d2a)
                         } else {
-                            rgb(0x664422)
+                            rgb(0x3d1f13)
                         };
                         div()
                             .id(SharedString::from(format!("vol-{}", i)))
@@ -1098,7 +1098,7 @@ impl CandleChart {
                 .left_0()
                 .w_full()
                 .h(px(1.0))
-                .bg(rgb(0x333333)),
+                .bg(rgb(0x252a3a)),
         );
 
         for (i, (macd_line, signal, histogram)) in macd_visible.iter().enumerate() {
@@ -1211,7 +1211,7 @@ impl CandleChart {
                 .left_0()
                 .w_full()
                 .h(px(1.0))
-                .bg(rgb(0x333333)),
+                .bg(rgb(0x252a3a)),
         );
 
         // Reference line at 30 (oversold)
@@ -1223,7 +1223,7 @@ impl CandleChart {
                 .left_0()
                 .w_full()
                 .h(px(1.0))
-                .bg(rgb(0x333333)),
+                .bg(rgb(0x252a3a)),
         );
 
         // RSI line dots
@@ -1278,7 +1278,7 @@ impl CandleChart {
                     .top(px(y70 - 10.0))
                     .right(px(4.0))
                     .text_size(px(9.))
-                    .text_color(rgb(0x444444))
+                    .text_color(rgb(0x454c5c))
                     .child("70"),
             )
             // 30 label
@@ -1288,7 +1288,7 @@ impl CandleChart {
                     .top(px(y30 - 10.0))
                     .right(px(4.0))
                     .text_size(px(9.))
-                    .text_color(rgb(0x444444))
+                    .text_color(rgb(0x454c5c))
                     .child("30"),
             )
             .child(rsi_overlay)

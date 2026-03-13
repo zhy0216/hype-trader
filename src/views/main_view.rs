@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use gpui::prelude::*;
-use gpui::{div, px, rgb, Entity, Subscription};
+use gpui::{div, px, Entity, Subscription};
 
 use crate::models::*;
 use crate::services::info_service::InfoService;
@@ -366,7 +366,7 @@ impl Render for MainView {
             .size_full()
             .flex()
             .flex_col()
-            .bg(rgb(0x1a1a2e))
+            .bg(crate::components::theme::bg_primary())
             .relative()
             // TopBar
             .child(self.top_bar.clone())
@@ -396,7 +396,13 @@ impl Render for MainView {
                     .child(self.order_book.clone()),
             )
             // BottomPanel
-            .child(div().h(px(250.)).child(self.bottom_panel.clone()))
+            .child(
+                div()
+                    .h(px(250.))
+                    .border_t_1()
+                    .border_color(crate::components::theme::border_primary())
+                    .child(self.bottom_panel.clone()),
+            )
             // Loading overlay
             .when(is_loading, |el| {
                 el.child(
@@ -408,12 +414,25 @@ impl Render for MainView {
                         .flex()
                         .items_center()
                         .justify_center()
-                        .bg(rgb(0x1a1a2e))
+                        .bg(crate::components::theme::bg_primary())
                         .child(
                             div()
-                                .text_color(rgb(0xcccccc))
-                                .text_size(px(18.))
-                                .child("Loading..."),
+                                .flex()
+                                .flex_col()
+                                .items_center()
+                                .gap(px(12.))
+                                .child(
+                                    div()
+                                        .text_color(crate::components::theme::color_brand())
+                                        .text_size(px(20.))
+                                        .child("Hype Trader"),
+                                )
+                                .child(
+                                    div()
+                                        .text_color(crate::components::theme::text_dim())
+                                        .text_size(px(14.))
+                                        .child("Loading..."),
+                                ),
                         ),
                 )
             })

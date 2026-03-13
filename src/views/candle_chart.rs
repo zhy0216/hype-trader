@@ -1,5 +1,8 @@
+use std::cell::Cell;
+use std::rc::Rc;
+
 use gpui::prelude::*;
-use gpui::{div, px, rgb, MouseButton, Point, Pixels, ScrollDelta, SharedString};
+use gpui::{canvas, div, px, rgb, Bounds, MouseButton, Point, Pixels, ScrollDelta, SharedString};
 
 use crate::components::theme::{bg_primary, border_primary, text_dimmest, text_dim, text_disabled, color_green, color_red};
 use crate::components::toggle_button::toggle_button;
@@ -23,6 +26,8 @@ pub struct CandleChart {
     pub hover_position: Option<Point<Pixels>>,
     /// True while fetching data for a new symbol
     pub loading: bool,
+    /// Tracks the chart area origin in window coordinates (updated each frame via canvas)
+    pub chart_area_origin: Rc<Cell<(f32, f32)>>,
 }
 
 impl CandleChart {
@@ -43,6 +48,7 @@ impl CandleChart {
             drag_start_offset: 0,
             hover_position: None,
             loading: false,
+            chart_area_origin: Rc::new(Cell::new((0.0, 0.0))),
         }
     }
 
@@ -400,16 +406,15 @@ impl Render for CandleChart {
         let candle_gap: f32 = 2.0;
         let chart_px_padding: f32 = 8.0;
         let dot_size: f32 = 3.0;
+        let current_interval = self.interval;
 
-        // Approximate chart area origin offset from window top-left
-        // toolbar ~32px + OHLCV bar ~24px = ~56px from top, 8px from left
-        let chart_area_top: f32 = 56.0;
-        let chart_area_left: f32 = chart_px_padding;
+        // Chart area origin in window coordinates (from previous frame's canvas callback)
+        let (chart_area_left_abs, chart_area_top_abs) = self.chart_area_origin.get();
 
         // Crosshair data: compute candle index and price from hover position
         let hover_info = self.hover_position.map(|pos| {
-            let local_x = f32::from(pos.x) - chart_area_left;
-            let local_y = f32::from(pos.y) - chart_area_top;
+            let local_x = f32::from(pos.x) - chart_area_left_abs;
+            let local_y = f32::from(pos.y) - chart_area_top_abs;
             let candle_step = candle_width + candle_gap;
             let candle_idx = if candle_step > 0.0 {
                 (local_x / candle_step) as usize
@@ -659,7 +664,7 @@ impl Render for CandleChart {
                 this.is_dragging = false;
             }))
             // Mouse move: drag pan + crosshair tracking
-            .on_mouse_move(cx.listener(move |this, event: &gpui::MouseMoveEvent, _window, _cx| {
+            .on_mouse_move(cx.listener(move |this, event: &gpui::MouseMoveEvent, _window, cx| {
                 // Update crosshair position
                 this.hover_position = Some(event.position);
 
@@ -674,12 +679,14 @@ impl Render for CandleChart {
                     this.scroll_offset = new_offset.max(0) as usize;
                     this.clamp_scroll_offset();
                 }
+                cx.notify();
             }))
             // Hover leave: clear crosshair
-            .on_hover(cx.listener(move |this, hovered: &bool, _window, _cx| {
+            .on_hover(cx.listener(move |this, hovered: &bool, _window, cx| {
                 if !hovered {
                     this.hover_position = None;
                     this.is_dragging = false;
+                    cx.notify();
                 }
             }))
             // Toolbar: interval selector buttons + MA toggles + indicator toggles
@@ -777,12 +784,24 @@ impl Render for CandleChart {
             // OHLCV info bar showing last candle data + MA values
             .child(self.render_ohlcv_bar(&visible, &ma_last_values))
             // Main chart area: candlesticks + MA overlay + BB overlay + crosshair
-            .child(
+            .child({
+                let origin_cell = self.chart_area_origin.clone();
                 div()
                     .h(px(chart_height))
                     .w_full()
                     .relative()
                     .overflow_hidden()
+                    // Invisible canvas to track chart area bounds in window coordinates
+                    .child(
+                        canvas(
+                            move |bounds: Bounds<Pixels>, _window, _cx| {
+                                origin_cell.set((f32::from(bounds.origin.x), f32::from(bounds.origin.y)));
+                            },
+                            |_, _, _, _| {},
+                        )
+                        .absolute()
+                        .size_full()
+                    )
                     .child(
                         div()
                             .h(px(chart_height))
@@ -811,6 +830,13 @@ impl Render for CandleChart {
                         if let Some((_pos, local_x, local_y, candle_idx, price_at_y)) = hover_info {
                             let total_chart_width = (visible.len() as f32) * (candle_width + candle_gap) + chart_px_padding * 2.0;
 
+                            // Snap crosshair X to candle center
+                            let snapped_x = if candle_idx < visible.len() {
+                                chart_px_padding + (candle_idx as f32) * (candle_width + candle_gap) + candle_width / 2.0
+                            } else {
+                                local_x
+                            };
+
                             // Crosshair container
                             let mut crosshair = div()
                                 .absolute()
@@ -819,13 +845,13 @@ impl Render for CandleChart {
                                 .w_full()
                                 .h(px(chart_height));
 
-                            // Vertical line at mouse X
-                            if local_x >= 0.0 && local_x <= total_chart_width {
+                            // Vertical line at snapped candle center
+                            if snapped_x >= 0.0 && snapped_x <= total_chart_width {
                                 crosshair = crosshair.child(
                                     div()
                                         .absolute()
                                         .top_0()
-                                        .left(px(local_x))
+                                        .left(px(snapped_x))
                                         .w(px(1.0))
                                         .h(px(chart_height))
                                         .bg(gpui::rgba(0xffffff44)),
@@ -887,6 +913,10 @@ impl Render for CandleChart {
                                         .gap(px(1.0))
                                         .text_size(px(10.0))
                                         .child(
+                                            div().text_color(text_dimmest())
+                                                .child(format_candle_time(c.time, current_interval))
+                                        )
+                                        .child(
                                             div().flex().gap(px(4.0))
                                                 .child(div().text_color(text_dimmest()).child("O"))
                                                 .child(div().text_color(rgb(color)).child(format!("{:.2}", c.open)))
@@ -912,10 +942,12 @@ impl Render for CandleChart {
                         } else {
                             el
                         }
-                    }),
-            )
+                    })
+            })
             // Price axis labels
             .child(self.render_price_axis(price_min, price_max))
+            // Time axis labels
+            .child(self.render_time_axis(&visible, candle_width, candle_gap, chart_px_padding))
             // Volume bars
             .child(
                 div()
@@ -1070,6 +1102,47 @@ impl CandleChart {
                     .text_color(text_disabled())
                     .child(format!("{:.2}", price))
             }))
+    }
+
+    /// Render the time axis showing timestamps for visible candles.
+    fn render_time_axis(
+        &self,
+        visible: &[Candle],
+        candle_width: f32,
+        candle_gap: f32,
+        chart_px_padding: f32,
+    ) -> impl IntoElement {
+        // Show ~5-7 evenly spaced time labels
+        let n = visible.len();
+        let label_count = 6usize;
+        let step = if n > label_count { n / label_count } else { 1 };
+
+        let candle_step = candle_width + candle_gap;
+
+        let mut container = div()
+            .w_full()
+            .flex()
+            .px(px(chart_px_padding))
+            .py(px(2.))
+            .relative()
+            .h(px(16.));
+
+        for i in (0..n).step_by(step.max(1)) {
+            let candle = &visible[i];
+            let x = (i as f32) * candle_step + (candle_width / 2.0);
+            let label = format_candle_time(candle.time, self.interval);
+
+            container = container.child(
+                div()
+                    .absolute()
+                    .left(px(chart_px_padding + x - 20.0))
+                    .text_size(px(10.))
+                    .text_color(text_disabled())
+                    .child(label),
+            );
+        }
+
+        container
     }
 
     /// Render the MACD sub-chart with histogram bars, MACD line, and signal line.
@@ -1317,4 +1390,39 @@ impl CandleChart {
             )
             .child(rsi_overlay)
     }
+}
+
+/// Format a candle timestamp (unix ms) as a human-readable time label.
+fn format_candle_time(time_ms: u64, interval: CandleInterval) -> String {
+    let secs = (time_ms / 1000) as i64;
+    // Manual UTC breakdown (no chrono dependency)
+    let days_since_epoch = secs / 86400;
+    let time_of_day = secs % 86400;
+    let hours = time_of_day / 3600;
+    let minutes = (time_of_day % 3600) / 60;
+
+    // Compute year/month/day from days since epoch
+    let (_year, month, day) = days_from_epoch(days_since_epoch);
+
+    match interval {
+        CandleInterval::D1 => format!("{:02}/{:02}", month, day),
+        CandleInterval::H4 | CandleInterval::H1 => format!("{:02}/{:02} {:02}:{:02}", month, day, hours, minutes),
+        _ => format!("{:02}:{:02}", hours, minutes),
+    }
+}
+
+/// Convert days since Unix epoch to (year, month, day).
+fn days_from_epoch(days: i64) -> (i64, u32, u32) {
+    // Civil calendar algorithm from Howard Hinnant
+    let z = days + 719468;
+    let era = if z >= 0 { z } else { z - 146096 } / 146097;
+    let doe = (z - era * 146097) as u32;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    (y, m, d)
 }

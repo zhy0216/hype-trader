@@ -4,6 +4,8 @@ A desktop trading client for [Hyperliquid](https://hyperliquid.xyz/) DEX, built 
 
 Trade perpetual futures with real-time market data, interactive charting, order management, and position tracking.
 
+![Hype Trader](static/screenshot1.png)
+
 ## Features
 
 - Real-time order book and market data via WebSocket

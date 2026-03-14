@@ -33,6 +33,8 @@ pub struct CandleChart {
     pub loading: bool,
     /// Tracks the chart area origin in window coordinates (updated each frame via canvas)
     pub chart_area_origin: Rc<Cell<(f32, f32)>>,
+    /// Tracks the chart area width in pixels (updated each frame via canvas)
+    pub chart_area_width: Rc<Cell<f32>>,
 }
 
 impl CandleChart {
@@ -54,13 +56,22 @@ impl CandleChart {
             hover_position: None,
             loading: false,
             chart_area_origin: Rc::new(Cell::new((0.0, 0.0))),
+            chart_area_width: Rc::new(Cell::new(0.0)),
         }
     }
 
-    /// Compute dynamic candle width based on visible_count.
-    /// When visible_count == 60 (default), width == 8.0.
+    /// Compute dynamic candle width based on container width and visible_count.
+    /// Candles fill the available width with a 2px gap between them.
     fn candle_width(&self) -> f32 {
-        (8.0f32 * 60.0 / self.visible_count as f32).clamp(2.0, 20.0)
+        let container_w = self.chart_area_width.get();
+        let padding = 16.0; // chart_px_padding * 2
+        let gap = 2.0;
+        let n = self.visible_count as f32;
+        if container_w > padding && n > 0.0 {
+            ((container_w - padding - gap * (n - 1.0)) / n).clamp(2.0, 20.0)
+        } else {
+            (8.0f32 * 60.0 / self.visible_count as f32).clamp(2.0, 20.0)
+        }
     }
 
     /// Clamp scroll_offset to valid range.
@@ -803,6 +814,7 @@ impl Render for CandleChart {
                     .w_full()
                     .child({
                 let origin_cell = self.chart_area_origin.clone();
+                let width_cell = self.chart_area_width.clone();
                 div()
                     .h(px(chart_height))
                     .flex_grow()
@@ -814,6 +826,7 @@ impl Render for CandleChart {
                         canvas(
                             move |bounds: Bounds<Pixels>, _window, _cx| {
                                 origin_cell.set((f32::from(bounds.origin.x), f32::from(bounds.origin.y)));
+                                width_cell.set(f32::from(bounds.size.width));
                             },
                             |_, _, _, _| {},
                         )

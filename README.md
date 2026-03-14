@@ -50,27 +50,31 @@ Configuration is stored at `~/.hype-trader/config.toml`.
 
 ```
 src/
-├── main.rs                # Entry point
-├── models.rs              # Data types (Symbol, Candle, Order, …)
-├── state.rs               # Global AppState
+├── main.rs                 # Entry point
+├── models.rs               # Data types (Symbol, Candle, Order, …)
+├── state.rs                # Global AppState
+├── components/
+│   ├── input_field.rs      # Text input widget
+│   ├── pnl_text.rs         # PnL display
+│   ├── stat_card.rs        # Stat card widget
+│   ├── status_dot.rs       # Status indicator
+│   ├── table.rs            # Table widget
+│   ├── theme.rs            # Theming
+│   └── toggle_button.rs    # Toggle button widget
 ├── services/
-│   ├── config_service.rs  # Config load/save
-│   ├── wallet_service.rs  # Key management
-│   ├── info_service.rs    # Market data queries
-│   ├── exchange_service.rs# Order placement
-│   └── ws_service.rs      # WebSocket streaming
+│   ├── config_service.rs   # Config load/save
+│   ├── wallet_service.rs   # Key management
+│   ├── info_service.rs     # Market data queries
+│   ├── exchange_service.rs # Order placement
+│   └── ws_service.rs       # WebSocket streaming
 └── views/
-    ├── welcome_view.rs    # Login screen
-    ├── main_view.rs       # Trading dashboard
-    ├── candle_chart.rs    # OHLCV charting
-    ├── order_book.rs      # Bid/ask display
-    ├── order_panel.rs     # Order entry
-    ├── symbol_list.rs     # Trading pairs
-    ├── bottom_panel.rs    # Positions/orders/history
-    ├── top_bar.rs         # Network/account/theme
-    └── toast.rs           # Notifications
+    ├── welcome_view.rs     # Login screen
+    ├── main_view.rs        # Trading dashboard
+    ├── candle_chart.rs     # OHLCV charting
+    ├── order_book.rs       # Bid/ask display
+    ├── order_panel.rs      # Order entry
+    ├── symbol_list.rs      # Trading pairs
+    ├── bottom_panel.rs     # Positions/orders/history
+    ├── top_bar.rs          # Network/account/theme
+    └── toast.rs            # Notifications
 ```
-
-## License
-
-Private — all rights reserved.
